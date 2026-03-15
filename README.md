@@ -1,5 +1,10 @@
 # Dakera TypeScript SDK
 
+[![CI](https://github.com/dakera-ai/dakera-js/actions/workflows/ci.yml/badge.svg)](https://github.com/dakera-ai/dakera-js/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dakera)](https://www.npmjs.com/package/dakera)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
+
 Official TypeScript/JavaScript client for [Dakera](https://github.com/dakera/dakera) - a high-performance vector database.
 
 ## Installation
@@ -287,6 +292,18 @@ npm run typecheck
 # Lint
 npm run lint
 ```
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [dakera](https://github.com/dakera-ai/dakera) | Core vector database engine (Rust) |
+| [dakera-py](https://github.com/dakera-ai/dakera-py) | Python SDK |
+| [dakera-go](https://github.com/dakera-ai/dakera-go) | Go SDK |
+| [dakera-mcp](https://github.com/dakera-ai/dakera-mcp) | MCP Server for AI agent memory |
+| [dakera-docs](https://github.com/dakera-ai/dakera-docs) | Documentation |
+| [dakera-deploy](https://github.com/dakera-ai/dakera-deploy) | Deployment configs and Docker Compose |
+| [dakera-cortex](https://github.com/dakera-ai/dakera-cortex) | Flagship demo with AI agents |
 
 ## License
 
