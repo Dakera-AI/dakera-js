@@ -327,18 +327,21 @@ describe('DakeraClient', () => {
     });
 
     it('should throw ServerError on 500', async () => {
-      mockFetch.mockResolvedValueOnce({
+      const mockResponse = {
         ok: false,
         status: 500,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ error: 'Internal server error' }),
-      });
+      };
+      mockFetch.mockResolvedValueOnce(mockResponse);
+      mockFetch.mockResolvedValueOnce(mockResponse);
+      mockFetch.mockResolvedValueOnce(mockResponse);
 
       await expect(client.health()).rejects.toThrow(ServerError);
     });
 
     it('should throw RateLimitError on 429', async () => {
-      mockFetch.mockResolvedValueOnce({
+      const mockResponse = {
         ok: false,
         status: 429,
         headers: new Headers({
@@ -346,7 +349,10 @@ describe('DakeraClient', () => {
           'Retry-After': '60',
         }),
         json: async () => ({ error: 'Rate limit exceeded' }),
-      });
+      };
+      mockFetch.mockResolvedValueOnce(mockResponse);
+      mockFetch.mockResolvedValueOnce(mockResponse);
+      mockFetch.mockResolvedValueOnce(mockResponse);
 
       await expect(client.query('test-ns', [0.1, 0.2, 0.3])).rejects.toThrow(
         RateLimitError
