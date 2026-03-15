@@ -40,11 +40,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dakera-ai/dakera"
+    "url": "https://github.com/dakera-ai/dakera-js.git"
   },
   "homepage": "https://dakera.ai",
   "bugs": {
-    "url": "https://github.com/dakera-ai/dakera/issues"
+    "url": "https://github.com/dakera-ai/dakera-js/issues"
   },
   "engines": {
     "node": ">=18.0.0"
