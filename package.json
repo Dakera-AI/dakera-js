@@ -1,5 +1,5 @@
 {
-  "name": "dakera",
+  "name": "@dakera-ai/dakera",
   "version": "0.1.0",
   "description": "TypeScript/JavaScript SDK for Dakera AI memory platform",
   "main": "dist/index.js",
