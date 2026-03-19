@@ -3,6 +3,52 @@
  */
 
 // ============================================================================
+// Branded ID Types
+//
+// Branded types prevent mixing up IDs from different domains at compile time.
+// Use the helper factory functions (vectorId, agentId, memoryId, sessionId)
+// to create branded IDs from plain strings.
+//
+// Example:
+//   import { vectorId, agentId } from '@dakera-ai/dakera';
+//   const id = vectorId('vec-001');          // VectorId (not a plain string)
+//   const agent = agentId('my-agent');       // AgentId
+// ============================================================================
+
+declare const __brand: unique symbol;
+type Brand<B> = { readonly [__brand]: B };
+
+/** A branded string type — T is the nominal tag that prevents cross-assignment. */
+export type Branded<T extends string, B> = T & Brand<B>;
+
+/** Opaque ID for a stored vector. */
+export type VectorId = Branded<string, 'VectorId'>;
+
+/** Opaque ID for an agent. */
+export type AgentId = Branded<string, 'AgentId'>;
+
+/** Opaque ID for a memory entry. */
+export type MemoryId = Branded<string, 'MemoryId'>;
+
+/** Opaque ID for a session. */
+export type SessionId = Branded<string, 'SessionId'>;
+
+// Factory helpers — cast plain strings into the correct branded type.
+// These are zero-cost at runtime (just identity functions).
+
+/** Create a VectorId from a plain string. */
+export function vectorId(id: string): VectorId { return id as VectorId; }
+
+/** Create an AgentId from a plain string. */
+export function agentId(id: string): AgentId { return id as AgentId; }
+
+/** Create a MemoryId from a plain string. */
+export function memoryId(id: string): MemoryId { return id as MemoryId; }
+
+/** Create a SessionId from a plain string. */
+export function sessionId(id: string): SessionId { return id as SessionId; }
+
+// ============================================================================
 // Consistency & Query Types (Turbopuffer-inspired)
 // ============================================================================
 
@@ -79,21 +125,21 @@ export interface WarmCacheResponse {
 
 /** Vector with ID, values, and optional metadata */
 export interface Vector {
-  id: string;
+  id: VectorId;
   values: number[];
   metadata?: Record<string, unknown>;
 }
 
 /** Input for vector operations - can be Vector object or plain object */
 export type VectorInput = Vector | {
-  id: string;
+  id: VectorId | string;
   values: number[];
   metadata?: Record<string, unknown>;
 };
 
 /** Result from a vector query */
 export interface QueryResult {
-  id: string;
+  id: VectorId;
   score: number;
   vector?: number[];
   metadata?: Record<string, unknown>;
@@ -131,28 +177,28 @@ export interface IndexStats {
 
 /** Document for full-text search */
 export interface Document {
-  id: string;
+  id: VectorId;
   content: string;
   metadata?: Record<string, unknown>;
 }
 
 /** Input for document operations */
 export type DocumentInput = Document | {
-  id: string;
+  id: VectorId | string;
   content: string;
   metadata?: Record<string, unknown>;
 };
 
 /** Result from full-text search */
 export interface FullTextSearchResult {
-  id: string;
+  id: VectorId;
   score: number;
   metadata?: Record<string, unknown>;
 }
 
 /** Result from hybrid search */
 export interface HybridSearchResult {
-  id: string;
+  id: VectorId;
   /** Combined score */
   score: number;
   /** Vector similarity score (normalized 0-1) */
@@ -327,7 +373,7 @@ export interface TextQueryOptions {
  */
 export interface TextSearchResult {
   /** Document ID */
-  id: string;
+  id: VectorId;
   /** Similarity score */
   score: number;
   /** Original text (if includeText was true) */
@@ -408,7 +454,7 @@ export interface StoreMemoryRequest {
 /** A stored memory */
 export interface Memory {
   /** Memory ID */
-  id: string;
+  id: MemoryId;
   /** Memory content */
   content: string;
   /** Memory type */
@@ -428,7 +474,7 @@ export interface Memory {
 /** A recalled memory with similarity score */
 export interface RecalledMemory {
   /** Memory ID */
-  id: string;
+  id: MemoryId;
   /** Memory content */
   content: string;
   /** Memory type */
@@ -446,7 +492,7 @@ export interface RecalledMemory {
 /** Response from storing a memory */
 export interface StoreMemoryResponse {
   /** Created memory ID */
-  memory_id: string;
+  memory_id: MemoryId;
   /** Status */
   status: string;
 }
@@ -476,7 +522,7 @@ export interface RecallRequest {
 /** Request to update importance */
 export interface UpdateImportanceRequest {
   /** Memory IDs to update */
-  memory_ids: string[];
+  memory_ids: MemoryId[];
   /** New importance value */
   importance: number;
 }
@@ -498,13 +544,13 @@ export interface ConsolidateResponse {
   /** Number of memories removed */
   removed_count: number;
   /** IDs of new consolidated memories */
-  new_memories: string[];
+  new_memories: MemoryId[];
 }
 
 /** Request for memory feedback */
 export interface MemoryFeedbackRequest {
   /** Memory ID */
-  memory_id: string;
+  memory_id: MemoryId;
   /** Feedback text */
   feedback: string;
   /** Optional relevance score */
@@ -526,7 +572,7 @@ export interface MemoryFeedbackResponse {
 /** Request to start a session */
 export interface StartSessionRequest {
   /** Agent ID */
-  agent_id: string;
+  agent_id: AgentId;
   /** Optional session metadata */
   metadata?: Record<string, unknown>;
 }
@@ -534,9 +580,9 @@ export interface StartSessionRequest {
 /** A session */
 export interface Session {
   /** Session ID */
-  session_id: string;
+  session_id: SessionId;
   /** Agent ID */
-  agent_id: string;
+  agent_id: AgentId;
   /** Start timestamp */
   started_at?: string;
   /** End timestamp */
@@ -564,7 +610,7 @@ export interface ListSessionsOptions {
 /** Summary info for an agent */
 export interface AgentSummary {
   /** Agent ID */
-  agent_id: string;
+  agent_id: AgentId;
   /** Total memory count */
   memory_count: number;
   /** Total session count */
@@ -576,7 +622,7 @@ export interface AgentSummary {
 /** Detailed stats for an agent */
 export interface AgentStats {
   /** Agent ID */
-  agent_id: string;
+  agent_id: AgentId;
   /** Total memory count */
   total_memories: number;
   /** Memories grouped by type */
@@ -599,15 +645,15 @@ export interface AgentStats {
 
 /** Request to build a knowledge graph */
 export interface KnowledgeGraphRequest {
-  agent_id: string;
-  memory_id?: string;
+  agent_id: AgentId;
+  memory_id?: MemoryId;
   depth?: number;
   min_similarity?: number;
 }
 
 /** A node in the knowledge graph */
 export interface KnowledgeNode {
-  id: string;
+  id: MemoryId;
   content: string;
   memory_type?: string;
   importance?: number;
@@ -616,8 +662,8 @@ export interface KnowledgeNode {
 
 /** An edge in the knowledge graph */
 export interface KnowledgeEdge {
-  source: string;
-  target: string;
+  source: MemoryId;
+  target: MemoryId;
   similarity: number;
   relationship?: string;
 }
@@ -631,7 +677,7 @@ export interface KnowledgeGraphResponse {
 
 /** Request for full knowledge graph */
 export interface FullKnowledgeGraphRequest {
-  agent_id: string;
+  agent_id: AgentId;
   max_nodes?: number;
   min_similarity?: number;
   cluster_threshold?: number;
@@ -640,8 +686,8 @@ export interface FullKnowledgeGraphRequest {
 
 /** Request to summarize memories */
 export interface SummarizeRequest {
-  agent_id: string;
-  memory_ids?: string[];
+  agent_id: AgentId;
+  memory_ids?: MemoryId[];
   target_type?: string;
   dry_run?: boolean;
 }
@@ -650,12 +696,12 @@ export interface SummarizeRequest {
 export interface SummarizeResponse {
   summary: string;
   source_count: number;
-  new_memory_id?: string;
+  new_memory_id?: MemoryId;
 }
 
 /** Request to deduplicate memories */
 export interface DeduplicateRequest {
-  agent_id: string;
+  agent_id: AgentId;
   threshold?: number;
   memory_type?: string;
   dry_run?: boolean;
