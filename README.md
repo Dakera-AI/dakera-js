@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
 
-Official TypeScript/JavaScript client for [Dakera](https://github.com/dakera/dakera) - a high-performance vector database.
+Official TypeScript/JavaScript client for [Dakera](https://dakera.ai) — a high-performance vector database for AI agent memory.
 
 ## Installation
 
@@ -44,10 +44,12 @@ for (const result of results.results) {
 ## Features
 
 - **Full TypeScript Support**: Complete type definitions for all operations
+- **Branded ID Types**: `VectorId`, `AgentId`, `MemoryId`, `SessionId` prevent cross-assignment bugs
 - **Vector Operations**: Upsert, query, delete, fetch vectors
 - **Full-Text Search**: Index documents and perform BM25 search
 - **Hybrid Search**: Combine vector and text search with configurable weights
 - **Namespace Management**: Create, list, delete namespaces
+- **Agent Memory**: Store, recall, and manage memories for AI agents
 - **Metadata Filtering**: Filter queries by metadata fields
 - **Automatic Retries**: Built-in retry logic with exponential backoff
 - **Error Handling**: Typed exceptions for different error scenarios
@@ -266,6 +268,29 @@ import type {
 } from 'dakera';
 ```
 
+### Branded ID Types
+
+v0.3.0 introduced branded string types to prevent accidental cross-assignment of IDs at compile time:
+
+```typescript
+import {
+  vectorId, agentId, memoryId, sessionId,
+  type VectorId, type AgentId, type MemoryId, type SessionId,
+} from 'dakera';
+
+// Factory helpers narrow plain strings to branded types
+const vid: VectorId = vectorId('vec-001');
+const aid: AgentId  = agentId('my-agent');
+
+// TypeScript catches cross-assignment mistakes:
+//   const bad: VectorId = agentId('x');  // TS error ✓
+
+// All SDK methods accept both branded and plain strings for convenience
+await client.upsert('my-namespace', [
+  { id: vid, values: [0.1, 0.2, 0.3] },
+]);
+```
+
 ## Browser Support
 
 This SDK uses the Fetch API and works in:
@@ -306,7 +331,6 @@ npm run lint
 | [dakera-dashboard](https://github.com/dakera-ai/dakera-dashboard) | Admin dashboard (Leptos/WASM) |
 | [dakera-docs](https://github.com/dakera-ai/dakera-docs) | Documentation |
 | [dakera-deploy](https://github.com/dakera-ai/dakera-deploy) | Deployment configs and Docker Compose |
-| [dakera-cortex](https://github.com/dakera-ai/dakera-cortex) | Flagship demo with AI agents |
 
 ## License
 
