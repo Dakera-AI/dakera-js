@@ -24,6 +24,10 @@
 // Client
 export { DakeraClient } from './client';
 
+// Branded ID types and factory helpers
+export type { VectorId, AgentId, MemoryId, SessionId, Branded } from './types';
+export { vectorId, agentId, memoryId, sessionId } from './types';
+
 // Types
 export type {
   // Core types
