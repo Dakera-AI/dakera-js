@@ -82,6 +82,7 @@ import type {
   MultiVectorSearchResponse,
   QueryExplainResponse,
   UnifiedQueryResponse,
+  DakeraEvent,
 } from './types';
 
 /** Default client options */
@@ -1460,5 +1461,104 @@ export class DakeraClient {
   /** Get usage statistics for an API key */
   async keyUsage(keyId: string): Promise<KeyUsage> {
     return this.request<KeyUsage>('GET', `/v1/keys/${keyId}/usage`);
+  }
+
+  // ===========================================================================
+  // SSE Streaming (CE-1)
+  // ===========================================================================
+
+  /**
+   * Stream SSE events scoped to a namespace.
+   *
+   * Opens a long-lived connection to `GET /v1/namespaces/{namespace}/events`
+   * and yields {@link DakeraEvent} objects as they arrive.  The async
+   * generator runs until the connection closes or the caller breaks the loop.
+   *
+   * Requires a Read-scoped API key.
+   *
+   * @example
+   * ```ts
+   * for await (const event of client.streamNamespaceEvents('my-ns')) {
+   *   if (event.type === 'vectors_mutated') {
+   *     console.log(`${event.count} vectors ${event.op} in ${event.namespace}`);
+   *   }
+   * }
+   * ```
+   */
+  async *streamNamespaceEvents(namespace: string): AsyncGenerator<DakeraEvent> {
+    const url = `${this.baseUrl}/v1/namespaces/${encodeURIComponent(namespace)}/events`;
+    yield* this._streamSse(url);
+  }
+
+  /**
+   * Stream all system events from the global event bus.
+   *
+   * Opens a long-lived connection to `GET /ops/events` and yields
+   * {@link DakeraEvent} objects as they arrive.
+   *
+   * Requires an Admin-scoped API key.
+   *
+   * @example
+   * ```ts
+   * for await (const event of client.streamGlobalEvents()) {
+   *   console.log(event.type, event);
+   * }
+   * ```
+   */
+  async *streamGlobalEvents(): AsyncGenerator<DakeraEvent> {
+    const url = `${this.baseUrl}/ops/events`;
+    yield* this._streamSse(url);
+  }
+
+  /** Low-level SSE streaming helper — parses the SSE wire format. */
+  private async *_streamSse(url: string): AsyncGenerator<DakeraEvent> {
+    const headers: Record<string, string> = {
+      ...this.headers,            // includes Authorization and any custom headers
+      Accept: 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    };
+
+    const response = await fetch(url, { headers });
+    if (!response.ok || !response.body) {
+      throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE events are separated by a blank line (\n\n)
+        let boundary: number;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const event = this._parseSseBlock(block);
+          if (event !== null) yield event;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /** Parse a single SSE event block into a {@link DakeraEvent}. */
+  private _parseSseBlock(block: string): DakeraEvent | null {
+    const dataLines: string[] = [];
+    for (const line of block.split('\n')) {
+      if (line.startsWith(':')) continue; // SSE comment / heartbeat
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+    }
+    if (dataLines.length === 0) return null;
+    try {
+      return JSON.parse(dataLines.join('\n')) as DakeraEvent;
+    } catch {
+      return null;
+    }
   }
 }

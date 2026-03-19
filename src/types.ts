@@ -965,6 +965,80 @@ export interface ColumnUpsertRequest {
 }
 
 // =============================================================================
+// SSE Streaming Event Types (CE-1)
+// =============================================================================
+
+/** Operation status for ``operation_progress`` events. */
+export type OpStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/** Vector mutation operation type for ``vectors_mutated`` events. */
+export type VectorMutationOp = 'upserted' | 'deleted';
+
+/** A namespace was created. */
+export interface NamespaceCreatedEvent {
+  type: 'namespace_created';
+  namespace: string;
+  dimension: number;
+}
+
+/** A namespace was deleted. */
+export interface NamespaceDeletedEvent {
+  type: 'namespace_deleted';
+  namespace: string;
+}
+
+/** Progress update for a long-running operation (0–100). */
+export interface OperationProgressEvent {
+  type: 'operation_progress';
+  operation_id: string;
+  namespace?: string;
+  op_type: string;
+  /** Progress percentage 0–100 */
+  progress: number;
+  status: OpStatus;
+  message?: string;
+  /** Unix milliseconds */
+  updated_at: number;
+}
+
+/** A background job changed status. */
+export interface JobProgressEvent {
+  type: 'job_progress';
+  job_id: string;
+  job_type: string;
+  namespace?: string;
+  progress: number;
+  status: string;
+}
+
+/** Vectors were upserted or deleted in bulk (threshold: >100 vectors). */
+export interface VectorsMutatedEvent {
+  type: 'vectors_mutated';
+  namespace: string;
+  op: VectorMutationOp;
+  count: number;
+}
+
+/**
+ * Subscriber fell too far behind — some events were dropped.
+ * Reconnect to resume the stream.
+ */
+export interface StreamLaggedEvent {
+  type: 'stream_lagged';
+  dropped: number;
+  hint: string;
+}
+
+/** Union of all Dakera SSE event types. */
+export type DakeraEvent =
+  | NamespaceCreatedEvent
+  | NamespaceDeletedEvent
+  | OperationProgressEvent
+  | JobProgressEvent
+  | VectorsMutatedEvent
+  | StreamLaggedEvent;
+
+// =============================================================================
 // Admin Types
 // =============================================================================
 

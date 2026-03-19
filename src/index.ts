@@ -134,6 +134,16 @@ export type {
   ApiKey,
   CreateKeyRequest,
   KeyUsage,
+  // SSE Streaming types
+  OpStatus,
+  VectorMutationOp,
+  DakeraEvent,
+  NamespaceCreatedEvent,
+  NamespaceDeletedEvent,
+  OperationProgressEvent,
+  JobProgressEvent,
+  VectorsMutatedEvent,
+  StreamLaggedEvent,
 } from './types';
 
 // Errors
