@@ -86,6 +86,8 @@ import type {
   MemoryEvent,
   CrossAgentNetworkRequest,
   CrossAgentNetworkResponse,
+  ConfigureNamespaceRequest,
+  ConfigureNamespaceResponse,
 } from './types';
 
 /** Default client options */
@@ -559,6 +561,23 @@ export class DakeraClient {
     if (options.metadata) body.metadata = options.metadata;
 
     return this.request<NamespaceInfo>('POST', '/v1/namespaces', body);
+  }
+
+  /**
+   * Create or update a namespace configuration (upsert semantics).
+   *
+   * Creates the namespace if it does not exist, or updates its configuration
+   * if it already exists.  Requires Write scope.
+   *
+   * @param namespace - Namespace name
+   * @param request - dimension and optional distance metric
+   * @returns ConfigureNamespaceResponse with ``created: true`` if newly created
+   */
+  async configureNamespace(
+    namespace: string,
+    request: ConfigureNamespaceRequest
+  ): Promise<ConfigureNamespaceResponse> {
+    return this.request<ConfigureNamespaceResponse>('PUT', `/v1/namespaces/${namespace}`, request);
   }
 
   /**
