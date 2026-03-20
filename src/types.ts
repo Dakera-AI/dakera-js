@@ -1039,6 +1039,98 @@ export type DakeraEvent =
   | StreamLaggedEvent;
 
 // =============================================================================
+// DASH-B: Memory Event Types (SSE stream — GET /v1/events/stream)
+// =============================================================================
+
+/**
+ * A memory lifecycle event emitted on the agent memory SSE stream.
+ *
+ * event_type values:
+ *   stored | recalled | forgotten | consolidated |
+ *   importance_updated | session_started | session_ended
+ */
+export interface MemoryEvent {
+  /** Memory lifecycle event type */
+  event_type: string;
+  /** Agent that owns the memory */
+  agent_id: string;
+  /** Unix milliseconds */
+  timestamp: number;
+  /** Memory ID (present for most event types) */
+  memory_id?: string;
+  /** Memory content snapshot */
+  content?: string;
+  /** Importance score at the time of the event */
+  importance?: number;
+  /** Tags associated with the memory */
+  tags?: string[];
+  /** Session ID (present for session_started / session_ended events) */
+  session_id?: string;
+}
+
+// =============================================================================
+// DASH-A: Cross-Agent Network Types (POST /v1/knowledge/network/cross-agent)
+// =============================================================================
+
+/** Summary info for one agent in the cross-agent network */
+export interface AgentNetworkInfo {
+  agent_id: string;
+  memory_count: number;
+  avg_importance: number;
+}
+
+/** A node in the cross-agent memory network graph */
+export interface AgentNetworkNode {
+  id: string;
+  agent_id: string;
+  content: string;
+  importance: number;
+  tags: string[];
+  memory_type: string;
+  /** Unix milliseconds */
+  created_at: number;
+}
+
+/** A cross-agent similarity edge */
+export interface AgentNetworkEdge {
+  source: string;
+  target: string;
+  source_agent: string;
+  target_agent: string;
+  similarity: number;
+}
+
+/** Aggregate statistics for the cross-agent network */
+export interface AgentNetworkStats {
+  total_agents: number;
+  total_nodes: number;
+  total_cross_edges: number;
+  density: number;
+}
+
+/** Response from the cross-agent network endpoint */
+export interface CrossAgentNetworkResponse {
+  agents: AgentNetworkInfo[];
+  nodes: AgentNetworkNode[];
+  edges: AgentNetworkEdge[];
+  stats: AgentNetworkStats;
+}
+
+/** Request body for POST /v1/knowledge/network/cross-agent */
+export interface CrossAgentNetworkRequest {
+  /** Agent IDs to include — undefined means all agents */
+  agent_ids?: string[];
+  /** Minimum similarity threshold for edges (default 0.3) */
+  min_similarity?: number;
+  /** Maximum nodes to include per agent (default 50) */
+  max_nodes_per_agent?: number;
+  /** Minimum importance for a node to be included (default 0.0) */
+  min_importance?: number;
+  /** Maximum cross-agent edges to return (default 200) */
+  max_cross_edges?: number;
+}
+
+// =============================================================================
 // Admin Types
 // =============================================================================
 
