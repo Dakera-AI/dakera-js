@@ -6,7 +6,9 @@
 
 import {
   AuthenticationError,
+  AuthorizationError,
   ConnectionError,
+  ErrorCode,
   NotFoundError,
   RateLimitError,
   ServerError,
@@ -14,6 +16,14 @@ import {
   ValidationError,
   DakeraError,
 } from './errors';
+
+/** Map a raw server code string to a typed ErrorCode, defaulting to UNKNOWN. */
+function parseErrorCode(raw: unknown): ErrorCode {
+  if (typeof raw === 'string' && raw in ErrorCode) {
+    return raw as ErrorCode;
+  }
+  return ErrorCode.UNKNOWN;
+}
 import type {
   AgentStats,
   AgentSummary,
@@ -224,27 +234,36 @@ export class DakeraClient {
           ? body
           : `HTTP ${response.status}`;
 
+    const code = parseErrorCode(
+      typeof body === 'object' && body !== null && 'code' in body
+        ? (body as { code: unknown }).code
+        : undefined
+    );
+
     switch (response.status) {
       case 400:
-        throw new ValidationError(errorMessage, response.status, body);
+        throw new ValidationError(errorMessage, response.status, body, code);
       case 401:
-        throw new AuthenticationError('Authentication failed', response.status, body);
+        throw new AuthenticationError('Authentication failed', response.status, body, code);
+      case 403:
+        throw new AuthorizationError(errorMessage, response.status, body, code);
       case 404:
-        throw new NotFoundError(errorMessage, response.status, body);
+        throw new NotFoundError(errorMessage, response.status, body, code);
       case 429: {
         const retryAfter = response.headers.get('Retry-After');
         throw new RateLimitError(
           'Rate limit exceeded',
           response.status,
           body,
-          retryAfter ? parseInt(retryAfter, 10) : undefined
+          retryAfter ? parseInt(retryAfter, 10) : undefined,
+          code
         );
       }
       default:
         if (response.status >= 500) {
-          throw new ServerError(errorMessage, response.status, body);
+          throw new ServerError(errorMessage, response.status, body, code);
         }
-        throw new DakeraError(errorMessage, response.status, body);
+        throw new DakeraError(errorMessage, response.status, body, code);
     }
   }
 

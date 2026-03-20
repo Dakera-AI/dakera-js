@@ -160,6 +160,7 @@ export type {
 
 // Errors
 export {
+  ErrorCode,
   DakeraError,
   ConnectionError,
   NotFoundError,
@@ -167,5 +168,6 @@ export {
   RateLimitError,
   ServerError,
   AuthenticationError,
+  AuthorizationError,
   TimeoutError,
 } from './errors';

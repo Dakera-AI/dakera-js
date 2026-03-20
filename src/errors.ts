@@ -2,16 +2,45 @@
  * Dakera SDK Errors
  */
 
+/** Server error codes returned in structured error responses */
+export enum ErrorCode {
+  // 404
+  NAMESPACE_NOT_FOUND = 'NAMESPACE_NOT_FOUND',
+  VECTOR_NOT_FOUND = 'VECTOR_NOT_FOUND',
+  // 400
+  DIMENSION_MISMATCH = 'DIMENSION_MISMATCH',
+  EMPTY_VECTOR = 'EMPTY_VECTOR',
+  INVALID_REQUEST = 'INVALID_REQUEST',
+  // 500
+  STORAGE_ERROR = 'STORAGE_ERROR',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+  // 413
+  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
+  // 503
+  SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
+  // 401
+  AUTHENTICATION_REQUIRED = 'AUTHENTICATION_REQUIRED',
+  INVALID_API_KEY = 'INVALID_API_KEY',
+  API_KEY_EXPIRED = 'API_KEY_EXPIRED',
+  // 403
+  INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE',
+  NAMESPACE_ACCESS_DENIED = 'NAMESPACE_ACCESS_DENIED',
+  // fallback
+  UNKNOWN = 'UNKNOWN',
+}
+
 /** Base error class for all Dakera errors */
 export class DakeraError extends Error {
   public readonly statusCode?: number;
   public readonly responseBody?: unknown;
+  public readonly code?: ErrorCode;
 
-  constructor(message: string, statusCode?: number, responseBody?: unknown) {
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
     super(message);
     this.name = 'DakeraError';
     this.statusCode = statusCode;
     this.responseBody = responseBody;
+    this.code = code;
     Object.setPrototypeOf(this, DakeraError.prototype);
   }
 }
@@ -27,8 +56,8 @@ export class ConnectionError extends DakeraError {
 
 /** Raised when a requested resource is not found */
 export class NotFoundError extends DakeraError {
-  constructor(message: string, statusCode?: number, responseBody?: unknown) {
-    super(message, statusCode, responseBody);
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
+    super(message, statusCode, responseBody, code);
     this.name = 'NotFoundError';
     Object.setPrototypeOf(this, NotFoundError.prototype);
   }
@@ -36,8 +65,8 @@ export class NotFoundError extends DakeraError {
 
 /** Raised when request validation fails */
 export class ValidationError extends DakeraError {
-  constructor(message: string, statusCode?: number, responseBody?: unknown) {
-    super(message, statusCode, responseBody);
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
+    super(message, statusCode, responseBody, code);
     this.name = 'ValidationError';
     Object.setPrototypeOf(this, ValidationError.prototype);
   }
@@ -51,9 +80,10 @@ export class RateLimitError extends DakeraError {
     message: string,
     statusCode?: number,
     responseBody?: unknown,
-    retryAfter?: number
+    retryAfter?: number,
+    code?: ErrorCode
   ) {
-    super(message, statusCode, responseBody);
+    super(message, statusCode, responseBody, code);
     this.name = 'RateLimitError';
     this.retryAfter = retryAfter;
     Object.setPrototypeOf(this, RateLimitError.prototype);
@@ -62,8 +92,8 @@ export class RateLimitError extends DakeraError {
 
 /** Raised when the server returns a 5xx error */
 export class ServerError extends DakeraError {
-  constructor(message: string, statusCode?: number, responseBody?: unknown) {
-    super(message, statusCode, responseBody);
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
+    super(message, statusCode, responseBody, code);
     this.name = 'ServerError';
     Object.setPrototypeOf(this, ServerError.prototype);
   }
@@ -71,10 +101,19 @@ export class ServerError extends DakeraError {
 
 /** Raised when authentication fails */
 export class AuthenticationError extends DakeraError {
-  constructor(message: string, statusCode?: number, responseBody?: unknown) {
-    super(message, statusCode, responseBody);
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
+    super(message, statusCode, responseBody, code);
     this.name = 'AuthenticationError';
     Object.setPrototypeOf(this, AuthenticationError.prototype);
+  }
+}
+
+/** Raised when authorization fails (403 Forbidden) */
+export class AuthorizationError extends DakeraError {
+  constructor(message: string, statusCode?: number, responseBody?: unknown, code?: ErrorCode) {
+    super(message, statusCode, responseBody, code);
+    this.name = 'AuthorizationError';
+    Object.setPrototypeOf(this, AuthorizationError.prototype);
   }
 }
 
