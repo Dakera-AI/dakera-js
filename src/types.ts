@@ -347,7 +347,7 @@ export interface TextUpsertResponse {
   /** Approximate number of tokens processed */
   tokens_processed: number;
   /** Embedding model used */
-  model: string;
+  model: EmbeddingModel;
   /** Time spent generating embeddings in milliseconds */
   embedding_time_ms: number;
 }
@@ -391,7 +391,7 @@ export interface TextQueryResponse {
   /** Search results */
   results: TextSearchResult[];
   /** Embedding model used */
-  model: string;
+  model: EmbeddingModel;
   /** Time spent generating query embedding in milliseconds */
   embedding_time_ms: number;
   /** Time spent searching in milliseconds */
@@ -419,11 +419,42 @@ export interface BatchTextQueryResponse {
   /** Results for each query */
   results: TextSearchResult[][];
   /** Embedding model used */
-  model: string;
+  model: EmbeddingModel;
   /** Time spent generating all embeddings in milliseconds */
   embedding_time_ms: number;
   /** Time spent on all searches in milliseconds */
   search_time_ms: number;
+}
+
+// =============================================================================
+// Namespace Configuration Types (v0.6.0)
+// =============================================================================
+
+/**
+ * Request body for ``PUT /v1/namespaces/:namespace`` (upsert semantics).
+ *
+ * Creates the namespace if it does not exist, or updates its configuration
+ * if it already exists.
+ */
+export interface ConfigureNamespaceRequest {
+  /** Vector dimension. Required on creation; must match on update. */
+  dimension: number;
+  /** Distance metric (default: cosine). */
+  distance?: DistanceMetric;
+}
+
+/**
+ * Response from ``PUT /v1/namespaces/:namespace``.
+ */
+export interface ConfigureNamespaceResponse {
+  /** Namespace name. */
+  namespace: string;
+  /** Vector dimension. */
+  dimension: number;
+  /** Distance metric in use. */
+  distance: DistanceMetric;
+  /** ``true`` if the namespace was newly created; ``false`` if it already existed. */
+  created: boolean;
 }
 
 // =============================================================================

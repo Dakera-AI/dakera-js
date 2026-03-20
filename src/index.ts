@@ -153,6 +153,9 @@ export type {
   AgentNetworkStats,
   CrossAgentNetworkResponse,
   CrossAgentNetworkRequest,
+  // Namespace configuration (v0.6.0)
+  ConfigureNamespaceRequest,
+  ConfigureNamespaceResponse,
 } from './types';
 
 // Errors
