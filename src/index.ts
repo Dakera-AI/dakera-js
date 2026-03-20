@@ -144,6 +144,15 @@ export type {
   JobProgressEvent,
   VectorsMutatedEvent,
   StreamLaggedEvent,
+  // DASH-B: Memory event stream types
+  MemoryEvent,
+  // DASH-A: Cross-agent network types
+  AgentNetworkInfo,
+  AgentNetworkNode,
+  AgentNetworkEdge,
+  AgentNetworkStats,
+  CrossAgentNetworkResponse,
+  CrossAgentNetworkRequest,
 } from './types';
 
 // Errors

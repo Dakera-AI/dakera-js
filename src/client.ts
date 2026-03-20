@@ -83,6 +83,9 @@ import type {
   QueryExplainResponse,
   UnifiedQueryResponse,
   DakeraEvent,
+  MemoryEvent,
+  CrossAgentNetworkRequest,
+  CrossAgentNetworkResponse,
 } from './types';
 
 /** Default client options */
@@ -1289,6 +1292,29 @@ export class DakeraClient {
     return this.request<DeduplicateResponse>('POST', '/v1/knowledge/deduplicate', request);
   }
 
+  /**
+   * Build a cross-agent memory network graph (DASH-A).
+   *
+   * Calls `POST /v1/knowledge/network/cross-agent` and returns a graph
+   * containing every agent's nodes and the cross-agent similarity edges that
+   * connect them.
+   *
+   * Requires an Admin-scoped API key.
+   *
+   * @example
+   * ```ts
+   * const network = await client.crossAgentNetwork({ min_similarity: 0.5 });
+   * console.log(`${network.stats.total_cross_edges} cross-agent edges`);
+   * ```
+   */
+  async crossAgentNetwork(req?: CrossAgentNetworkRequest): Promise<CrossAgentNetworkResponse> {
+    return this.request<CrossAgentNetworkResponse>(
+      'POST',
+      '/v1/knowledge/network/cross-agent',
+      req ?? {},
+    );
+  }
+
   // ===========================================================================
   // Analytics Operations
   // ===========================================================================
@@ -1510,6 +1536,29 @@ export class DakeraClient {
     yield* this._streamSse(url);
   }
 
+  /**
+   * Stream memory lifecycle events for all agents (DASH-B).
+   *
+   * Opens a long-lived connection to `GET /v1/events/stream` and yields
+   * {@link MemoryEvent} objects as they arrive.  Each SSE frame uses the
+   * `event:` field for the event_type and a JSON `data:` payload.
+   *
+   * Requires a Read-scoped API key.
+   *
+   * @example
+   * ```ts
+   * for await (const ev of client.streamMemoryEvents()) {
+   *   if (ev.event_type === 'stored') {
+   *     console.log(`Memory stored for agent ${ev.agent_id}: ${ev.content}`);
+   *   }
+   * }
+   * ```
+   */
+  async *streamMemoryEvents(): AsyncGenerator<MemoryEvent> {
+    const url = `${this.baseUrl}/v1/events/stream`;
+    yield* this._streamSseMemory(url);
+  }
+
   /** Low-level SSE streaming helper — parses the SSE wire format. */
   private async *_streamSse(url: string): AsyncGenerator<DakeraEvent> {
     const headers: Record<string, string> = {
@@ -1557,6 +1606,76 @@ export class DakeraClient {
     if (dataLines.length === 0) return null;
     try {
       return JSON.parse(dataLines.join('\n')) as DakeraEvent;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Low-level SSE streaming helper for the memory event stream.
+   *
+   * The memory event stream sets the SSE `event:` field to the event_type
+   * and the `data:` field to the JSON payload.  This helper merges the two
+   * so callers receive a fully-populated {@link MemoryEvent}.
+   */
+  private async *_streamSseMemory(url: string): AsyncGenerator<MemoryEvent> {
+    const headers: Record<string, string> = {
+      ...this.headers,
+      Accept: 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    };
+
+    const response = await fetch(url, { headers });
+    if (!response.ok || !response.body) {
+      throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary: number;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const event = this._parseSseMemoryBlock(block);
+          if (event !== null) yield event;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /** Parse a single SSE event block into a {@link MemoryEvent}. */
+  private _parseSseMemoryBlock(block: string): MemoryEvent | null {
+    let eventType: string | undefined;
+    const dataLines: string[] = [];
+
+    for (const line of block.split('\n')) {
+      if (line.startsWith(':')) continue; // SSE comment / heartbeat
+      if (line.startsWith('event:')) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+
+    if (dataLines.length === 0) return null;
+
+    try {
+      const parsed = JSON.parse(dataLines.join('\n')) as MemoryEvent;
+      // Ensure event_type is populated — prefer the SSE event: field when set.
+      if (eventType && !parsed.event_type) {
+        parsed.event_type = eventType;
+      }
+      return parsed;
     } catch {
       return null;
     }
