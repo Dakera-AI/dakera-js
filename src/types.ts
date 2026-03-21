@@ -1145,6 +1145,8 @@ export interface CrossAgentNetworkResponse {
   nodes: AgentNetworkNode[];
   edges: AgentNetworkEdge[];
   stats: AgentNetworkStats;
+  /** Total number of memory nodes in the network (added in server v0.6.2). */
+  node_count: number;
 }
 
 /** Request body for POST /v1/knowledge/network/cross-agent */
