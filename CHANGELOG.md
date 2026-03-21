@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-03-21
+
+### Added
+- `CrossAgentNetworkResponse.node_count` field — reflects the `node_count` field added in
+  dakera server v0.6.2 (PR #26). Previously the field was silently ignored.
+- `DakeraClient.sseUrl(path)` helper — returns a fully-qualified SSE URL with `?api_key=`
+  appended. Use this to construct URLs for browser-native `EventSource`, which cannot send
+  custom request headers.
+- `_streamSse` and `_streamSseMemory` now authenticate via `?api_key=` query parameter
+  instead of the `Authorization` header, making internally streamed URLs compatible with
+  native `EventSource` clients.
+
 ## [0.2.0] - 2026-03-19
 
 ### Security

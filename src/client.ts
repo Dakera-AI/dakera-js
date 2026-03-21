@@ -1597,15 +1597,36 @@ export class DakeraClient {
     yield* this._streamSseMemory(url);
   }
 
+  /**
+   * Return a URL with `?api_key=<key>` appended for use with browser-native
+   * `EventSource`, which cannot send custom request headers.
+   *
+   * @example
+   * ```ts
+   * const src = new EventSource(client.sseUrl('/v1/namespaces/my-ns/events'));
+   * ```
+   */
+  sseUrl(path: string): string {
+    const base = `${this.baseUrl}${path}`;
+    if (!this.apiKey) return base;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}api_key=${encodeURIComponent(this.apiKey)}`;
+  }
+
   /** Low-level SSE streaming helper — parses the SSE wire format. */
   private async *_streamSse(url: string): AsyncGenerator<DakeraEvent> {
+    // Append ?api_key= so the URL is compatible with browser-native EventSource
+    // (which cannot send custom headers). fetch() also accepts the header form,
+    // but the query-param form works for both transports.
+    const sseUrl = this.apiKey
+      ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.apiKey)}`
+      : url;
     const headers: Record<string, string> = {
-      ...this.headers,            // includes Authorization and any custom headers
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
     };
 
-    const response = await fetch(url, { headers });
+    const response = await fetch(sseUrl, { headers });
     if (!response.ok || !response.body) {
       throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
     }
@@ -1657,13 +1678,15 @@ export class DakeraClient {
    * so callers receive a fully-populated {@link MemoryEvent}.
    */
   private async *_streamSseMemory(url: string): AsyncGenerator<MemoryEvent> {
+    const sseUrl = this.apiKey
+      ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.apiKey)}`
+      : url;
     const headers: Record<string, string> = {
-      ...this.headers,
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
     };
 
-    const response = await fetch(url, { headers });
+    const response = await fetch(sseUrl, { headers });
     if (!response.ok || !response.body) {
       throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
     }
