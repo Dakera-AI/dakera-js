@@ -86,6 +86,14 @@ export type {
   ConsolidateResponse,
   MemoryFeedbackRequest,
   MemoryFeedbackResponse,
+  // Batch memory operations (CE-2)
+  BatchMemoryFilter,
+  BatchRecallRequest,
+  BatchRecallResponse,
+  BatchForgetRequest,
+  BatchForgetResponse,
+  // Rate-limit headers (OPS-1)
+  RateLimitHeaders,
   // Session types
   StartSessionRequest,
   Session,
