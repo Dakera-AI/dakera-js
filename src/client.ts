@@ -98,6 +98,11 @@ import type {
   CrossAgentNetworkResponse,
   ConfigureNamespaceRequest,
   ConfigureNamespaceResponse,
+  BatchRecallRequest,
+  BatchRecallResponse,
+  BatchForgetRequest,
+  BatchForgetResponse,
+  RateLimitHeaders,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -129,6 +134,8 @@ export class DakeraClient {
   private readonly connectTimeout: number;
   private readonly retryConfig: Required<import('./types').RetryConfig>;
   private readonly headers: Record<string, string>;
+  /** OPS-1: rate-limit headers from the most recent API response. */
+  private _lastRateLimitHeaders: RateLimitHeaders | null = null;
 
   constructor(options: ClientOptions | string) {
     if (typeof options === 'string') {
@@ -156,6 +163,15 @@ export class DakeraClient {
     if (this.apiKey) {
       this.headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
+  }
+
+  /**
+   * Rate-limit headers from the most recent API response (OPS-1).
+   *
+   * Returns `null` until the first successful request has been made.
+   */
+  get lastRateLimitHeaders(): RateLimitHeaders | null {
+    return this._lastRateLimitHeaders;
   }
 
   private computeBackoff(attempt: number): number {
@@ -250,6 +266,15 @@ export class DakeraClient {
    * Handle HTTP response and throw appropriate errors.
    */
   private async handleResponse<T>(response: Response): Promise<T> {
+    // OPS-1: capture rate-limit headers before consuming the body
+    this._lastRateLimitHeaders = {
+      limit: this._parseHeaderInt(response.headers.get('X-RateLimit-Limit')),
+      remaining: this._parseHeaderInt(response.headers.get('X-RateLimit-Remaining')),
+      reset: this._parseHeaderInt(response.headers.get('X-RateLimit-Reset')),
+      quotaUsed: this._parseHeaderInt(response.headers.get('X-Quota-Used')),
+      quotaLimit: this._parseHeaderInt(response.headers.get('X-Quota-Limit')),
+    };
+
     let body: unknown;
     const contentType = response.headers.get('content-type');
 
@@ -301,6 +326,12 @@ export class DakeraClient {
         }
         throw new DakeraError(errorMessage, response.status, body, code);
     }
+  }
+
+  private _parseHeaderInt(value: string | null): number | undefined {
+    if (value === null) return undefined;
+    const n = parseInt(value, 10);
+    return isNaN(n) ? undefined : n;
   }
 
   private sleep(ms: number): Promise<void> {
@@ -1251,6 +1282,44 @@ export class DakeraClient {
   /** Delete a memory */
   async forget(agentId: string, memoryId: string): Promise<{ status: string }> {
     return this.request<{ status: string }>('DELETE', `/v1/agents/${agentId}/memories/${memoryId}`);
+  }
+
+  /**
+   * Bulk-recall memories using filter predicates (CE-2).
+   *
+   * Uses `POST /v1/memories/recall/batch` — no embedding required.
+   *
+   * @example
+   * ```typescript
+   * const resp = await client.batchRecall({
+   *   agent_id: 'agent-1',
+   *   filter: { tags: ['preferences'], min_importance: 0.7 },
+   *   limit: 50,
+   * });
+   * console.log(`Found ${resp.filtered} memories`);
+   * ```
+   */
+  async batchRecall(request: BatchRecallRequest): Promise<BatchRecallResponse> {
+    return this.request<BatchRecallResponse>('POST', '/v1/memories/recall/batch', request);
+  }
+
+  /**
+   * Bulk-delete memories using filter predicates (CE-2).
+   *
+   * Uses `DELETE /v1/memories/forget/batch`.  At least one filter predicate
+   * must be set (server safety guard).
+   *
+   * @example
+   * ```typescript
+   * const resp = await client.batchForget({
+   *   agent_id: 'agent-1',
+   *   filter: { created_before: Math.floor(Date.now() / 1000) - 86400 },
+   * });
+   * console.log(`Deleted ${resp.deleted_count} memories`);
+   * ```
+   */
+  async batchForget(request: BatchForgetRequest): Promise<BatchForgetResponse> {
+    return this.request<BatchForgetResponse>('DELETE', '/v1/memories/forget/batch', request);
   }
 
   /** Search memories for an agent */

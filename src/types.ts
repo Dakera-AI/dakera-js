@@ -1261,3 +1261,85 @@ export interface KeyUsage {
   last_used?: string;
   requests_by_endpoint?: Record<string, number>;
 }
+
+// ============================================================================
+// OPS-1: Rate-Limit Headers
+// ============================================================================
+
+/**
+ * Rate-limit and quota headers present on every API response (OPS-1).
+ *
+ * Fields are `undefined` when the server does not include the header
+ * (e.g. non-namespaced endpoints where quota does not apply).
+ */
+export interface RateLimitHeaders {
+  /** `X-RateLimit-Limit` — max requests allowed in the current window. */
+  limit?: number;
+  /** `X-RateLimit-Remaining` — requests left in the current window. */
+  remaining?: number;
+  /** `X-RateLimit-Reset` — Unix timestamp (seconds) when the window resets. */
+  reset?: number;
+  /** `X-Quota-Used` — namespace vectors / storage consumed. */
+  quotaUsed?: number;
+  /** `X-Quota-Limit` — namespace quota ceiling. */
+  quotaLimit?: number;
+}
+
+// ============================================================================
+// CE-2: Batch Recall / Forget
+// ============================================================================
+
+/**
+ * Filter predicates for batch memory operations (CE-2).
+ *
+ * All fields are optional.  For `batchForget` at least one must be set
+ * (server-side safety guard).
+ */
+export interface BatchMemoryFilter {
+  /** Restrict to memories that carry **all** listed tags. */
+  tags?: string[];
+  /** Minimum importance (inclusive). */
+  min_importance?: number;
+  /** Maximum importance (inclusive). */
+  max_importance?: number;
+  /** Only memories created at or after this Unix timestamp (seconds). */
+  created_after?: number;
+  /** Only memories created before or at this Unix timestamp (seconds). */
+  created_before?: number;
+  /** Restrict to a specific memory type. */
+  memory_type?: MemoryType;
+  /** Restrict to memories from a specific session. */
+  session_id?: string;
+}
+
+/** Request body for `POST /v1/memories/recall/batch`. */
+export interface BatchRecallRequest {
+  /** Agent whose memory namespace to search. */
+  agent_id: string;
+  /** Filter predicates to apply.  An empty object returns all memories up to `limit`. */
+  filter?: BatchMemoryFilter;
+  /** Maximum number of results to return (default: 100). */
+  limit?: number;
+}
+
+/** Response from `POST /v1/memories/recall/batch`. */
+export interface BatchRecallResponse {
+  memories: Memory[];
+  /** Total memories in the agent namespace. */
+  total: number;
+  /** Number of memories that passed the filter. */
+  filtered: number;
+}
+
+/** Request body for `DELETE /v1/memories/forget/batch`. */
+export interface BatchForgetRequest {
+  /** Agent whose memory namespace to purge from. */
+  agent_id: string;
+  /** Filter predicates — **at least one must be set** (server safety guard). */
+  filter: BatchMemoryFilter;
+}
+
+/** Response from `DELETE /v1/memories/forget/batch`. */
+export interface BatchForgetResponse {
+  deleted_count: number;
+}
