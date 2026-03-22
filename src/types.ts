@@ -290,16 +290,34 @@ export interface BatchQuerySpec {
   stalenessConfig?: StalenessConfig;
 }
 
+/** Exponential backoff configuration for retries */
+export interface RetryConfig {
+  /** Maximum number of retry attempts (default: 3) */
+  maxRetries?: number;
+  /** Base delay in milliseconds before the first retry (default: 100) */
+  baseDelay?: number;
+  /** Maximum delay in milliseconds between retries (default: 60000) */
+  maxDelay?: number;
+  /** Whether to add random jitter to backoff delay (default: true) */
+  jitter?: boolean;
+}
+
 /** Client configuration options */
 export interface ClientOptions {
   /** Base URL of the Dakera server */
   baseUrl: string;
   /** API key for authentication */
   apiKey?: string;
-  /** Request timeout in milliseconds */
+  /** Per-request timeout in milliseconds (default: 30000) */
   timeout?: number;
-  /** Maximum number of retries */
+  /** Connection establishment timeout in milliseconds. Defaults to `timeout`. */
+  connectTimeout?: number;
+  /** Maximum number of retries for transient errors (default: 3).
+   *  Ignored when `retryBackoff` is provided. */
   maxRetries?: number;
+  /** Fine-grained retry and backoff configuration.
+   *  When provided, `maxRetries` is ignored in favour of `retryBackoff.maxRetries`. */
+  retryBackoff?: RetryConfig;
   /** Additional headers */
   headers?: Record<string, string>;
 }

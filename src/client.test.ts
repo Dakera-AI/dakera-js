@@ -341,12 +341,13 @@ describe('DakeraClient', () => {
     });
 
     it('should throw RateLimitError on 429', async () => {
+      // Use Retry-After: 0 so the client retries immediately without sleeping
       const mockResponse = {
         ok: false,
         status: 429,
         headers: new Headers({
           'content-type': 'application/json',
-          'Retry-After': '60',
+          'Retry-After': '0',
         }),
         json: async () => ({ error: 'Rate limit exceeded' }),
       };
@@ -371,6 +372,104 @@ describe('DakeraClient', () => {
       const health = await client.health();
 
       expect(health.status).toBe('healthy');
+    });
+  });
+
+  describe('RetryConfig', () => {
+    it('should accept retryBackoff configuration', () => {
+      const c = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        retryBackoff: { maxRetries: 5, baseDelay: 200, maxDelay: 30000, jitter: false },
+      });
+      // Access internal config via any cast to verify
+      const rc = (c as unknown as { retryConfig: { maxRetries: number; baseDelay: number } }).retryConfig;
+      expect(rc.maxRetries).toBe(5);
+      expect(rc.baseDelay).toBe(200);
+    });
+
+    it('retryBackoff.maxRetries overrides maxRetries option', () => {
+      const c = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        maxRetries: 1,
+        retryBackoff: { maxRetries: 7 },
+      });
+      const rc = (c as unknown as { retryConfig: { maxRetries: number } }).retryConfig;
+      expect(rc.maxRetries).toBe(7);
+    });
+
+    it('should accept connectTimeout', () => {
+      const c = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        timeout: 30000,
+        connectTimeout: 5000,
+      });
+      const ct = (c as unknown as { connectTimeout: number }).connectTimeout;
+      expect(ct).toBe(5000);
+    });
+
+    it('connectTimeout defaults to timeout', () => {
+      const c = new DakeraClient({ baseUrl: 'http://localhost:3000', timeout: 15000 });
+      const ct = (c as unknown as { connectTimeout: number }).connectTimeout;
+      expect(ct).toBe(15000);
+    });
+
+    it('should retry on 5xx and succeed on recovery', async () => {
+      const fail500 = {
+        ok: false,
+        status: 500,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ error: 'internal error' }),
+      };
+      const success = {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ status: 'healthy', version: '1.0.0' }),
+      };
+
+      const c = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        retryBackoff: { maxRetries: 3, baseDelay: 0, jitter: false },
+      });
+
+      mockFetch.mockResolvedValueOnce(fail500);
+      mockFetch.mockResolvedValueOnce(fail500);
+      mockFetch.mockResolvedValueOnce(success);
+
+      const result = await c.health();
+      expect(result.status).toBe('healthy');
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('respects Retry-After: 0 header on 429', async () => {
+      const rate429 = {
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'content-type': 'application/json', 'Retry-After': '0' }),
+        json: async () => ({ error: 'rate limited' }),
+      };
+      const success = {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ upserted_count: 1 }),
+      };
+
+      const c = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        retryBackoff: { maxRetries: 2, baseDelay: 60000, jitter: false },
+      });
+
+      mockFetch.mockResolvedValueOnce(rate429);
+      mockFetch.mockResolvedValueOnce(success);
+
+      const start = Date.now();
+      await c.upsert('ns', [{ id: 'v1', values: [0.1, 0.2] }]);
+      const elapsed = Date.now() - start;
+
+      // Retry-After: 0 → near-instant retry, not 60s base delay
+      expect(elapsed).toBeLessThan(2000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 });

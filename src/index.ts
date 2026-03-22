@@ -30,6 +30,8 @@ export { vectorId, agentId, memoryId, sessionId } from './types';
 
 // Types
 export type {
+  // Retry & timeout configuration
+  RetryConfig,
   // Core types
   Vector,
   VectorInput,
