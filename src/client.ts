@@ -100,12 +100,10 @@ import type {
   ConfigureNamespaceResponse,
 } from './types';
 
-/** Default client options */
-const DEFAULT_OPTIONS: Required<Omit<ClientOptions, 'apiKey' | 'headers'>> = {
-  baseUrl: 'http://localhost:3000',
-  timeout: 30000,
-  maxRetries: 3,
-};
+const DEFAULT_TIMEOUT = 30000;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_BASE_DELAY = 100;
+const DEFAULT_MAX_DELAY = 60000;
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -128,7 +126,8 @@ export class DakeraClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly timeout: number;
-  private readonly maxRetries: number;
+  private readonly connectTimeout: number;
+  private readonly retryConfig: Required<import('./types').RetryConfig>;
   private readonly headers: Record<string, string>;
 
   constructor(options: ClientOptions | string) {
@@ -138,8 +137,16 @@ export class DakeraClient {
 
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.apiKey = options.apiKey;
-    this.timeout = options.timeout ?? DEFAULT_OPTIONS.timeout;
-    this.maxRetries = options.maxRetries ?? DEFAULT_OPTIONS.maxRetries;
+    this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
+    this.connectTimeout = options.connectTimeout ?? this.timeout;
+
+    const rb = options.retryBackoff ?? {};
+    this.retryConfig = {
+      maxRetries: rb.maxRetries ?? options.maxRetries ?? DEFAULT_MAX_RETRIES,
+      baseDelay: rb.baseDelay ?? DEFAULT_BASE_DELAY,
+      maxDelay: rb.maxDelay ?? DEFAULT_MAX_DELAY,
+      jitter: rb.jitter ?? true,
+    };
 
     this.headers = {
       'Content-Type': 'application/json',
@@ -151,8 +158,17 @@ export class DakeraClient {
     }
   }
 
+  private computeBackoff(attempt: number): number {
+    const { baseDelay, maxDelay, jitter } = this.retryConfig;
+    let delay = Math.min(maxDelay, baseDelay * Math.pow(2, attempt));
+    if (jitter) {
+      delay *= 0.5 + Math.random();
+    }
+    return delay;
+  }
+
   /**
-   * Make an HTTP request with retry logic.
+   * Make an HTTP request with retry logic and exponential backoff.
    */
   private async request<T>(
     method: string,
@@ -160,12 +176,18 @@ export class DakeraClient {
     body?: unknown
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const { maxRetries } = this.retryConfig;
+    // connectTimeout governs the initial connection phase; timeout governs the full request
+    const connectMs = Math.min(this.connectTimeout, this.timeout);
     let lastError: Error | undefined;
 
-    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+        // connectTimeout governs TCP connect; timeout governs the full request.
+        // fetch does not expose a separate connect phase so we use the shorter
+        // of the two as a conservative bound for the entire round trip.
+        const timerId = setTimeout(() => controller.abort(), connectMs);
 
         const response = await fetch(url, {
           method,
@@ -174,25 +196,42 @@ export class DakeraClient {
           signal: controller.signal,
         });
 
-        clearTimeout(timeoutId);
+        clearTimeout(timerId);
 
         return await this.handleResponse<T>(response);
       } catch (error) {
+        if (error instanceof RateLimitError) {
+          if (attempt === maxRetries - 1) throw error;
+          const wait =
+            error.retryAfter != null
+              ? error.retryAfter * 1000
+              : this.computeBackoff(attempt);
+          await this.sleep(wait);
+          continue;
+        }
+
         if (error instanceof DakeraError) {
-          // Don't retry client errors (4xx) except rate limits
           if (
             error.statusCode &&
             error.statusCode >= 400 &&
-            error.statusCode < 500 &&
-            !(error instanceof RateLimitError)
+            error.statusCode < 500
           ) {
             throw error;
           }
-        }
-
-        if (error instanceof Error) {
+          if (attempt === maxRetries - 1) throw error;
+          lastError = error;
+        } else if (error instanceof Error) {
+          if (attempt === maxRetries - 1) {
+            if (error.name === 'AbortError') {
+              throw new TimeoutError(`Request timed out after ${connectMs}ms`);
+            }
+            if (error.message.includes('fetch')) {
+              throw new ConnectionError(`Failed to connect to ${url}: ${error.message}`);
+            }
+            throw error;
+          }
           if (error.name === 'AbortError') {
-            lastError = new TimeoutError(`Request timed out after ${this.timeout}ms`);
+            lastError = new TimeoutError(`Request timed out after ${connectMs}ms`);
           } else if (error.message.includes('fetch')) {
             lastError = new ConnectionError(`Failed to connect to ${url}: ${error.message}`);
           } else {
@@ -200,10 +239,7 @@ export class DakeraClient {
           }
         }
 
-        // Wait before retry (exponential backoff)
-        if (attempt < this.maxRetries - 1) {
-          await this.sleep(Math.pow(2, attempt) * 100);
-        }
+        await this.sleep(this.computeBackoff(attempt));
       }
     }
 
