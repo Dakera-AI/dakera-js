@@ -616,7 +616,7 @@ export class DakeraClient {
 
     const response = await this.request<{ results: HybridSearchResult[] }>(
       'POST',
-      `/v1/namespaces/${namespace}/fulltext/hybrid`,
+      `/v1/namespaces/${namespace}/hybrid`,
       body
     );
     return response.results;
