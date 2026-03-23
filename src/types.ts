@@ -1101,13 +1101,17 @@ export type DakeraEvent =
  * A memory lifecycle event emitted on the agent memory SSE stream.
  *
  * event_type values:
- *   stored | recalled | forgotten | consolidated |
- *   importance_updated | session_started | session_ended
+ *   connected | stored | recalled | forgotten | consolidated |
+ *   importance_updated | session_started | session_ended | stream_lagged
+ *
+ * The `connected` event is emitted immediately on stream subscription to
+ * signal the connection is live. `agent_id` will be an empty string for
+ * `connected` events.
  */
 export interface MemoryEvent {
   /** Memory lifecycle event type */
   event_type: string;
-  /** Agent that owns the memory */
+  /** Agent that owns the memory (empty string for the `connected` handshake) */
   agent_id: string;
   /** Unix milliseconds */
   timestamp: number;
