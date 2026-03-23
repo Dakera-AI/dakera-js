@@ -576,33 +576,43 @@ export class DakeraClient {
   /**
    * Perform hybrid search combining vector and full-text.
    *
+   * When `vector` is omitted the server falls back to BM25-only full-text
+   * search. When provided, results are blended with vector similarity
+   * according to `alpha`.
+   *
    * @param namespace - Target namespace
-   * @param vector - Query vector
    * @param query - Text query
-   * @param options - Search options including alpha for balance
+   * @param options - Search options: vector (optional), topK, alpha, filter
    * @returns Hybrid search results
    *
    * @example
    * ```typescript
-   * const results = await client.hybridSearch('my-namespace', [0.1, 0.2, 0.3], 'machine learning', {
+   * // Hybrid (vector + text)
+   * const results = await client.hybridSearch('my-namespace', 'machine learning', {
+   *   vector: [0.1, 0.2, 0.3],
    *   topK: 10,
    *   alpha: 0.7, // 70% text, 30% vector
    * });
+   * // BM25-only (no vector)
+   * const results = await client.hybridSearch('my-namespace', 'machine learning');
    * ```
    */
   async hybridSearch(
     namespace: string,
-    vector: number[],
     query: string,
-    options: { topK?: number; alpha?: number; filter?: FilterExpression } = {}
+    options: { vector?: number[]; topK?: number; alpha?: number; filter?: FilterExpression } = {}
   ): Promise<HybridSearchResult[]> {
-    const body = {
-      vector,
+    const body: Record<string, unknown> = {
       query,
       top_k: options.topK ?? 10,
       alpha: options.alpha ?? 0.5,
-      filter: options.filter,
     };
+    if (options.vector != null) {
+      body['vector'] = options.vector;
+    }
+    if (options.filter !== undefined) {
+      body['filter'] = options.filter;
+    }
 
     const response = await this.request<{ results: HybridSearchResult[] }>(
       'POST',

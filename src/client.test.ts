@@ -216,7 +216,7 @@ describe('DakeraClient', () => {
       expect(results[0].id).toBe('doc1');
     });
 
-    it('should perform hybrid search', async () => {
+    it('should perform hybrid search with vector', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -229,14 +229,28 @@ describe('DakeraClient', () => {
 
       const results = await client.hybridSearch(
         'test-ns',
-        [0.1, 0.2, 0.3],
         'hello',
-        { alpha: 0.5 }
+        { vector: [0.1, 0.2, 0.3], alpha: 0.5 }
       );
 
       expect(results).toHaveLength(1);
       expect(results[0].vectorScore).toBe(0.9);
       expect(results[0].textScore).toBe(0.8);
+    });
+
+    it('should perform BM25-only hybrid search when vector is omitted', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          results: [{ id: 'doc2', score: 0.75, vectorScore: 0, textScore: 0.75 }],
+        }),
+      });
+
+      const results = await client.hybridSearch('test-ns', 'hello');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('doc2');
     });
   });
 
