@@ -151,6 +151,12 @@ export type {
   AutoPilotDedupResult,
   AutoPilotConsolidationResult,
   AutoPilotTriggerResponse,
+  // Decay Engine types (DECAY-1 / DECAY-2)
+  DecayConfigResponse,
+  DecayConfigUpdateRequest,
+  DecayConfigUpdateResponse,
+  LastDecayCycleStats,
+  DecayStatsResponse,
   // API Key types
   ApiKey,
   CreateKeyRequest,
