@@ -492,8 +492,14 @@ export interface StoreMemoryRequest {
   importance?: number;
   /** Optional metadata */
   metadata?: Record<string, unknown>;
-  /** TTL in seconds */
+  /** TTL in seconds — memory is hard-deleted after this many seconds from creation */
   ttl_seconds?: number;
+  /**
+   * Explicit expiry as a Unix timestamp (seconds).
+   * Takes precedence over `ttl_seconds` when both are provided.
+   * The memory is hard-deleted by the decay engine on expiry (DECAY-3).
+   */
+  expires_at?: number;
   /** Associated session ID */
   session_id?: string;
   /** Pre-computed embedding */
@@ -1310,6 +1316,59 @@ export interface AutoPilotTriggerResponse {
   dedup?: AutoPilotDedupResult;
   consolidation?: AutoPilotConsolidationResult;
   message: string;
+}
+
+// =============================================================================
+// Decay Engine Types (DECAY-1 / DECAY-2)
+// =============================================================================
+
+/** Response from GET /v1/admin/decay/config (DECAY-1) */
+export interface DecayConfigResponse {
+  /** Decay strategy: "exponential", "linear", or "step" */
+  strategy: 'exponential' | 'linear' | 'step';
+  /** Half-life in hours */
+  half_life_hours: number;
+  /** Minimum importance threshold; memories below are hard-deleted on next cycle */
+  min_importance: number;
+}
+
+/** Request for PUT /v1/admin/decay/config (DECAY-1) */
+export interface DecayConfigUpdateRequest {
+  /** Decay strategy: "exponential", "linear", or "step" */
+  strategy?: 'exponential' | 'linear' | 'step';
+  /** Half-life in hours (must be > 0) */
+  half_life_hours?: number;
+  /** Minimum importance threshold 0.0–1.0 */
+  min_importance?: number;
+}
+
+/** Response from PUT /v1/admin/decay/config (DECAY-1) */
+export interface DecayConfigUpdateResponse {
+  success: boolean;
+  config: DecayConfigResponse;
+  message: string;
+}
+
+/** Stats from a single decay cycle */
+export interface LastDecayCycleStats {
+  namespaces_processed: number;
+  memories_processed: number;
+  memories_decayed: number;
+  memories_deleted: number;
+}
+
+/** Response from GET /v1/admin/decay/stats (DECAY-2) */
+export interface DecayStatsResponse {
+  /** Total memories whose importance was lowered by decay (all-time) */
+  total_decayed: number;
+  /** Total memories hard-deleted by decay or TTL expiry (all-time) */
+  total_deleted: number;
+  /** Unix timestamp of the last decay cycle (undefined if never run) */
+  last_run_at?: number;
+  /** Number of decay cycles completed since startup */
+  cycles_run: number;
+  /** Stats from the most recent decay cycle (undefined if never run) */
+  last_cycle?: LastDecayCycleStats;
 }
 
 // =============================================================================

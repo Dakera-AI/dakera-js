@@ -108,6 +108,10 @@ import type {
   AutoPilotConfigResponse,
   AutoPilotTriggerAction,
   AutoPilotTriggerResponse,
+  DecayConfigResponse,
+  DecayConfigUpdateRequest,
+  DecayConfigUpdateResponse,
+  DecayStatsResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1611,6 +1615,25 @@ export class DakeraClient {
   /** Manually trigger an AutoPilot dedup or consolidation cycle (PILOT-3) */
   async autopilotTrigger(action: AutoPilotTriggerAction): Promise<AutoPilotTriggerResponse> {
     return this.request<AutoPilotTriggerResponse>('POST', '/v1/admin/autopilot/trigger', { action });
+  }
+
+  /** Get current decay engine configuration (DECAY-1). Requires Admin scope. */
+  async decayConfig(): Promise<DecayConfigResponse> {
+    return this.request<DecayConfigResponse>('GET', '/v1/admin/decay/config');
+  }
+
+  /**
+   * Update decay engine configuration at runtime (DECAY-1). Requires Admin scope.
+   * Changes take effect on the next decay cycle — no restart required.
+   * All fields are optional; omit any to keep its current value.
+   */
+  async decayUpdateConfig(request: DecayConfigUpdateRequest): Promise<DecayConfigUpdateResponse> {
+    return this.request<DecayConfigUpdateResponse>('PUT', '/v1/admin/decay/config', request);
+  }
+
+  /** Get decay activity counters and last-cycle snapshot (DECAY-2). Requires Admin scope. */
+  async decayStats(): Promise<DecayStatsResponse> {
+    return this.request<DecayStatsResponse>('GET', '/v1/admin/decay/stats');
   }
 
   // ===========================================================================
