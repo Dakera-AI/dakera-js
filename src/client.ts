@@ -103,6 +103,11 @@ import type {
   BatchForgetRequest,
   BatchForgetResponse,
   RateLimitHeaders,
+  AutoPilotStatusResponse,
+  AutoPilotConfigRequest,
+  AutoPilotConfigResponse,
+  AutoPilotTriggerAction,
+  AutoPilotTriggerResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1591,6 +1596,21 @@ export class DakeraClient {
     const body: Record<string, unknown> = { ttl_seconds: ttlSeconds };
     if (strategy) body.strategy = strategy;
     return this.request<TtlConfig>('POST', `/v1/admin/namespaces/${namespace}/ttl`, body);
+  }
+
+  /** Get AutoPilot status: current config and last-run statistics (PILOT-1) */
+  async autopilotStatus(): Promise<AutoPilotStatusResponse> {
+    return this.request<AutoPilotStatusResponse>('GET', '/v1/admin/autopilot/status');
+  }
+
+  /** Update AutoPilot configuration at runtime (PILOT-2) */
+  async autopilotUpdateConfig(request: AutoPilotConfigRequest): Promise<AutoPilotConfigResponse> {
+    return this.request<AutoPilotConfigResponse>('PUT', '/v1/admin/autopilot/config', request);
+  }
+
+  /** Manually trigger an AutoPilot dedup or consolidation cycle (PILOT-3) */
+  async autopilotTrigger(action: AutoPilotTriggerAction): Promise<AutoPilotTriggerResponse> {
+    return this.request<AutoPilotTriggerResponse>('POST', '/v1/admin/autopilot/trigger', { action });
   }
 
   // ===========================================================================

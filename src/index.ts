@@ -140,6 +140,17 @@ export type {
   SlowQuery,
   BackupInfo,
   TtlConfig,
+  // AutoPilot types (PILOT-1/2/3)
+  AutoPilotConfig,
+  DedupResultSnapshot,
+  ConsolidationResultSnapshot,
+  AutoPilotStatusResponse,
+  AutoPilotConfigRequest,
+  AutoPilotConfigResponse,
+  AutoPilotTriggerAction,
+  AutoPilotDedupResult,
+  AutoPilotConsolidationResult,
+  AutoPilotTriggerResponse,
   // API Key types
   ApiKey,
   CreateKeyRequest,
