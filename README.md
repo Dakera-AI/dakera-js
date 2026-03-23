@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
 
-Official TypeScript/JavaScript client for [Dakera](https://dakera.ai) — a high-performance vector database for AI agent memory.
+Official TypeScript/JavaScript client for [Dakera](https://dakera.ai) — an AI agent memory platform.
 
 ## Installation
 
@@ -322,7 +322,7 @@ npm run lint
 
 | Repository | Description |
 |------------|-------------|
-| [dakera](https://github.com/dakera-ai/dakera) | Core vector database engine (Rust) |
+| [dakera](https://github.com/dakera-ai/dakera) | Core AI agent memory engine (Rust) |
 | [dakera-py](https://github.com/dakera-ai/dakera-py) | Python SDK |
 | [dakera-go](https://github.com/dakera-ai/dakera-go) | Go SDK |
 | [dakera-rs](https://github.com/dakera-ai/dakera-rs) | Rust SDK |
