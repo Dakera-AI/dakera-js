@@ -1889,10 +1889,21 @@ export class DakeraClient {
     if (dataLines.length === 0) return null;
 
     try {
-      const parsed = JSON.parse(dataLines.join('\n')) as MemoryEvent;
+      const raw = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+      // Build a MemoryEvent, normalising the connected handshake event which
+      // uses {"type":"connected","timestamp":...} instead of the normal shape.
+      const parsed = raw as unknown as MemoryEvent;
       // Ensure event_type is populated — prefer the SSE event: field when set.
       if (eventType && !parsed.event_type) {
         parsed.event_type = eventType;
+      }
+      // connected event uses "type" key; fall back to it if event_type still unset.
+      if (!parsed.event_type && typeof raw['type'] === 'string') {
+        parsed.event_type = raw['type'] as string;
+      }
+      // agent_id is absent on connected events — default to empty string.
+      if (parsed.agent_id === undefined) {
+        parsed.agent_id = '';
       }
       return parsed;
     } catch {
