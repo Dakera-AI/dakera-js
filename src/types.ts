@@ -1233,6 +1233,86 @@ export interface TtlConfig {
 }
 
 // =============================================================================
+// AutoPilot Types (PILOT-1 / PILOT-2 / PILOT-3)
+// =============================================================================
+
+/** AutoPilot configuration */
+export interface AutoPilotConfig {
+  enabled: boolean;
+  dedup_threshold: number;
+  dedup_interval_hours: number;
+  consolidation_interval_hours: number;
+}
+
+/** Result snapshot from a deduplication cycle */
+export interface DedupResultSnapshot {
+  namespaces_processed: number;
+  memories_scanned: number;
+  duplicates_removed: number;
+}
+
+/** Result snapshot from a consolidation cycle */
+export interface ConsolidationResultSnapshot {
+  namespaces_processed: number;
+  memories_scanned: number;
+  clusters_merged: number;
+  memories_consolidated: number;
+}
+
+/** PILOT-1: AutoPilot status response */
+export interface AutoPilotStatusResponse {
+  config: AutoPilotConfig;
+  last_dedup_at?: number;
+  last_consolidation_at?: number;
+  last_dedup?: DedupResultSnapshot;
+  last_consolidation?: ConsolidationResultSnapshot;
+  total_dedup_removed: number;
+  total_consolidated: number;
+}
+
+/** PILOT-2: AutoPilot configuration update request (all fields optional) */
+export interface AutoPilotConfigRequest {
+  enabled?: boolean;
+  dedup_threshold?: number;
+  dedup_interval_hours?: number;
+  consolidation_interval_hours?: number;
+}
+
+/** PILOT-2: AutoPilot configuration update response */
+export interface AutoPilotConfigResponse {
+  success: boolean;
+  config: AutoPilotConfig;
+  message: string;
+}
+
+/** PILOT-3: Trigger action */
+export type AutoPilotTriggerAction = 'dedup' | 'consolidate' | 'all';
+
+/** Dedup result from a manual trigger */
+export interface AutoPilotDedupResult {
+  namespaces_processed: number;
+  memories_scanned: number;
+  duplicates_removed: number;
+}
+
+/** Consolidation result from a manual trigger */
+export interface AutoPilotConsolidationResult {
+  namespaces_processed: number;
+  memories_scanned: number;
+  clusters_merged: number;
+  memories_consolidated: number;
+}
+
+/** PILOT-3: Trigger response */
+export interface AutoPilotTriggerResponse {
+  success: boolean;
+  action: AutoPilotTriggerAction;
+  dedup?: AutoPilotDedupResult;
+  consolidation?: AutoPilotConsolidationResult;
+  message: string;
+}
+
+// =============================================================================
 // API Key Types
 // =============================================================================
 
