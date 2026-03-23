@@ -236,6 +236,10 @@ describe('DakeraClient', () => {
       expect(results).toHaveLength(1);
       expect(results[0].vectorScore).toBe(0.9);
       expect(results[0].textScore).toBe(0.8);
+      // Verify correct endpoint was called
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/test-ns/hybrid');
+      expect(init?.method).toBe('POST');
     });
 
     it('should perform BM25-only hybrid search when vector is omitted', async () => {
@@ -251,6 +255,10 @@ describe('DakeraClient', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe('doc2');
+      // Verify correct endpoint was called
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/test-ns/hybrid');
+      expect(init?.method).toBe('POST');
     });
   });
 
