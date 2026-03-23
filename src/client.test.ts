@@ -609,4 +609,279 @@ describe('DakeraClient', () => {
       expect(rl!.reset).toBeUndefined();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // AutoPilot Management (PILOT-1/2/3) — v0.7.2
+  // ---------------------------------------------------------------------------
+
+  describe('autopilotStatus', () => {
+    it('GETs /v1/admin/autopilot/status and returns config + stats', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          config: {
+            enabled: true,
+            dedup_threshold: 0.93,
+            dedup_interval_hours: 6,
+            consolidation_interval_hours: 12,
+          },
+          last_dedup_at: 1700000000,
+          total_dedup_removed: 42,
+          total_consolidated: 10,
+        }),
+      });
+
+      const result = await client.autopilotStatus();
+
+      expect(result.config.enabled).toBe(true);
+      expect(result.config.dedup_threshold).toBe(0.93);
+      expect(result.total_dedup_removed).toBe(42);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/autopilot/status');
+      expect(init?.method).toBe('GET');
+    });
+  });
+
+  describe('autopilotUpdateConfig', () => {
+    it('PUTs /v1/admin/autopilot/config and returns updated config', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          config: {
+            enabled: false,
+            dedup_threshold: 0.90,
+            dedup_interval_hours: 8,
+            consolidation_interval_hours: 24,
+          },
+          message: 'AutoPilot config updated',
+        }),
+      });
+
+      const result = await client.autopilotUpdateConfig({ enabled: false, dedup_threshold: 0.90 });
+
+      expect(result.success).toBe(true);
+      expect(result.config.enabled).toBe(false);
+      expect(result.config.dedup_threshold).toBe(0.90);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/autopilot/config');
+      expect(init?.method).toBe('PUT');
+    });
+
+    it('sends only the fields that are set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ success: true, config: {}, message: 'ok' }),
+      });
+
+      await client.autopilotUpdateConfig({ dedup_interval_hours: 4 });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.dedup_interval_hours).toBe(4);
+      expect(body.enabled).toBeUndefined();
+    });
+  });
+
+  describe('autopilotTrigger', () => {
+    it('POSTs /v1/admin/autopilot/trigger with action and returns results', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          action: 'dedup',
+          dedup: { namespaces_processed: 3, memories_scanned: 500, duplicates_removed: 12 },
+          message: 'Dedup cycle completed',
+        }),
+      });
+
+      const result = await client.autopilotTrigger('dedup');
+
+      expect(result.success).toBe(true);
+      expect(result.action).toBe('dedup');
+      expect(result.dedup?.duplicates_removed).toBe(12);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/autopilot/trigger');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(init?.body as string).action).toBe('dedup');
+    });
+
+    it('action=all returns both dedup and consolidation results', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          action: 'all',
+          dedup: { namespaces_processed: 2, memories_scanned: 300, duplicates_removed: 5 },
+          consolidation: { namespaces_processed: 2, memories_scanned: 300, clusters_merged: 4, memories_consolidated: 8 },
+          message: 'Full AutoPilot cycle completed',
+        }),
+      });
+
+      const result = await client.autopilotTrigger('all');
+
+      expect(result.consolidation?.clusters_merged).toBe(4);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Decay Engine Management (DECAY-1/2) — v0.7.3
+  // ---------------------------------------------------------------------------
+
+  describe('decayConfig', () => {
+    it('GETs /v1/admin/decay/config and returns strategy/half-life/min', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          strategy: 'exponential',
+          half_life_hours: 168.0,
+          min_importance: 0.05,
+        }),
+      });
+
+      const result = await client.decayConfig();
+
+      expect(result.strategy).toBe('exponential');
+      expect(result.half_life_hours).toBe(168.0);
+      expect(result.min_importance).toBe(0.05);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/decay/config');
+      expect(init?.method).toBe('GET');
+    });
+  });
+
+  describe('decayUpdateConfig', () => {
+    it('PUTs /v1/admin/decay/config and returns updated config', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          config: { strategy: 'linear', half_life_hours: 72.0, min_importance: 0.1 },
+          message: 'Decay config updated',
+        }),
+      });
+
+      const result = await client.decayUpdateConfig({ strategy: 'linear', half_life_hours: 72.0 });
+
+      expect(result.success).toBe(true);
+      expect(result.config.strategy).toBe('linear');
+      expect(result.config.half_life_hours).toBe(72.0);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/decay/config');
+      expect(init?.method).toBe('PUT');
+    });
+
+    it('sends only the fields that are set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ success: true, config: {}, message: 'ok' }),
+      });
+
+      await client.decayUpdateConfig({ min_importance: 0.02 });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.min_importance).toBe(0.02);
+      expect(body.strategy).toBeUndefined();
+    });
+  });
+
+  describe('decayStats', () => {
+    it('GETs /v1/admin/decay/stats and returns counters + last-cycle snapshot', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          total_decayed: 1024,
+          total_deleted: 128,
+          last_run_at: 1700000000,
+          cycles_run: 42,
+          last_cycle: {
+            namespaces_processed: 5,
+            memories_processed: 200,
+            memories_decayed: 30,
+            memories_deleted: 5,
+          },
+        }),
+      });
+
+      const result = await client.decayStats();
+
+      expect(result.total_decayed).toBe(1024);
+      expect(result.total_deleted).toBe(128);
+      expect(result.cycles_run).toBe(42);
+      expect(result.last_cycle?.memories_decayed).toBe(30);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/decay/stats');
+      expect(init?.method).toBe('GET');
+    });
+
+    it('handles response with no last_cycle (never run)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ total_decayed: 0, total_deleted: 0, cycles_run: 0 }),
+      });
+
+      const result = await client.decayStats();
+
+      expect(result.cycles_run).toBe(0);
+      expect(result.last_cycle).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // store_memory with expires_at (DECAY-3) — v0.7.3
+  // ---------------------------------------------------------------------------
+
+  describe('storeMemory', () => {
+    it('includes expires_at in request body when set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ id: 'mem_1', content: 'test' }),
+      });
+
+      await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic', expires_at: 1800000000 });
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/agents/agent-1/memories');
+      const body = JSON.parse(init?.body as string);
+      expect(body.expires_at).toBe(1800000000);
+    });
+
+    it('omits expires_at from request body when not set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ id: 'mem_1', content: 'test' }),
+      });
+
+      await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic' });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.expires_at).toBeUndefined();
+    });
+  });
 });
