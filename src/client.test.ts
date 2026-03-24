@@ -906,4 +906,75 @@ describe('DakeraClient', () => {
       expect(body.expires_at).toBeUndefined();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // SSE Connected Event (DAK-720) — v0.8.3
+  // ---------------------------------------------------------------------------
+
+  describe('streamMemoryEvents — connected handshake', () => {
+    /** Build a mock fetch Response whose body is a ReadableStream of SSE chunks. */
+    function makeSseResponse(chunks: string[]): Response {
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(encoder.encode(chunk));
+          }
+          controller.close();
+        },
+      });
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body,
+      } as unknown as Response;
+    }
+
+    it('yields connected event with normalized event_type and empty agent_id', async () => {
+      // Server sends: event: connected\ndata: {"type":"connected","timestamp":...}\n\n
+      const sseChunk =
+        'event: connected\ndata: {"type":"connected","timestamp":1700000000000}\n\n';
+      mockFetch.mockResolvedValueOnce(makeSseResponse([sseChunk]));
+
+      const events: import('./types').MemoryEvent[] = [];
+      for await (const event of client.streamMemoryEvents()) {
+        events.push(event);
+        break;
+      }
+
+      expect(events).toHaveLength(1);
+      expect(events[0].event_type).toBe('connected');
+      expect(events[0].agent_id).toBe('');
+      expect(events[0].timestamp).toBe(1700000000000);
+    });
+
+    it('calls the correct memory events endpoint', async () => {
+      const sseChunk =
+        'event: connected\ndata: {"type":"connected","timestamp":1700000000000}\n\n';
+      mockFetch.mockResolvedValueOnce(makeSseResponse([sseChunk]));
+
+      for await (const _event of client.streamMemoryEvents()) {
+        break;
+      }
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/events/stream');
+    });
+
+    it('connected event has no memory_id or content', async () => {
+      const sseChunk =
+        'event: connected\ndata: {"type":"connected","timestamp":1700000000000}\n\n';
+      mockFetch.mockResolvedValueOnce(makeSseResponse([sseChunk]));
+
+      const events: import('./types').MemoryEvent[] = [];
+      for await (const event of client.streamMemoryEvents()) {
+        events.push(event);
+        break;
+      }
+
+      expect(events[0].memory_id).toBeUndefined();
+      expect(events[0].content).toBeUndefined();
+    });
+  });
 });
