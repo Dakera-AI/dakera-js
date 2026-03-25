@@ -112,6 +112,7 @@ import type {
   DecayConfigUpdateRequest,
   DecayConfigUpdateResponse,
   DecayStatsResponse,
+  OpsStats,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1519,6 +1520,12 @@ export class DakeraClient {
   // ===========================================================================
   // Admin Operations (Extended)
   // ===========================================================================
+
+  /** Get server stats (version, total_vectors, namespace_count, uptime_seconds, timestamp).
+   *  Requires Read scope — works with read-only API keys, unlike clusterStatus. */
+  async opsStats(): Promise<OpsStats> {
+    return this.request<OpsStats>('GET', '/v1/ops/stats');
+  }
 
   /** Get cluster status */
   async clusterStatus(): Promise<ClusterStatus> {

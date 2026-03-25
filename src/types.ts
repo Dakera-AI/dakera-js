@@ -1195,6 +1195,15 @@ export interface CrossAgentNetworkRequest {
 // Admin Types
 // =============================================================================
 
+/** Ops stats response — Read-scoped; works with read-only API keys */
+export interface OpsStats {
+  version: string;
+  total_vectors: number;
+  namespace_count: number;
+  uptime_seconds: number;
+  timestamp: number;
+}
+
 /** Cluster status response */
 export interface ClusterStatus {
   status: string;

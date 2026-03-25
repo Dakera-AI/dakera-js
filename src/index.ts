@@ -134,6 +134,7 @@ export type {
   QueryExplainResponse,
   ColumnUpsertRequest,
   // Admin types
+  OpsStats,
   ClusterStatus,
   ClusterNode,
   CacheStats,
