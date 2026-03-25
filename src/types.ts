@@ -1202,6 +1202,7 @@ export interface OpsStats {
   namespace_count: number;
   uptime_seconds: number;
   timestamp: number;
+  state: string;
 }
 
 /** Cluster status response */
