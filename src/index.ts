@@ -198,6 +198,15 @@ export type {
   ExtractedEntity,
   EntityExtractionResponse,
   MemoryEntitiesResponse,
+  // Memory Feedback Loop (INT-1)
+  FeedbackSignal,
+  FeedbackHistoryEntry,
+  MemoryFeedbackBodyRequest,
+  MemoryImportancePatchRequest,
+  FeedbackResponse,
+  FeedbackHistoryResponse,
+  AgentFeedbackSummary,
+  FeedbackHealthResponse,
 } from './types';
 
 // Errors
