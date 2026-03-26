@@ -1592,3 +1592,27 @@ export interface MemoryGraphOptions {
   /** Filter by edge types. `undefined` returns all types. */
   types?: EdgeType[];
 }
+
+/** Configuration for namespace-level entity extraction (CE-4). */
+export interface NamespaceNerConfig {
+  extract_entities: boolean;
+  entity_types?: string[];
+}
+
+/** A single extracted entity from GLiNER or rule-based pipeline. */
+export interface ExtractedEntity {
+  entity_type: string;
+  value: string;
+  score: number;
+}
+
+/** Response from POST /v1/memories/extract */
+export interface EntityExtractionResponse {
+  entities: ExtractedEntity[];
+}
+
+/** Response from GET /v1/memory/entities/:id */
+export interface MemoryEntitiesResponse {
+  memory_id: string;
+  entities: ExtractedEntity[];
+}

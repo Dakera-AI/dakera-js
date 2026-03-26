@@ -1200,4 +1200,88 @@ describe('DakeraClient', () => {
       }).rejects.toThrow('stream dropped');
     });
   });
+
+  // =========================================================================
+  // Entity Extraction Tests (CE-4)
+  // =========================================================================
+
+  describe('Entity Extraction API (CE-4)', () => {
+    it('configureNamespaceNer calls PATCH /v1/namespaces/:ns/config with config body', async () => {
+      const mockResponse = { extract_entities: true, entity_types: ['person', 'org'] };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.configureNamespaceNer('my-ns', { extract_entities: true, entity_types: ['person', 'org'] });
+      expect(result).toEqual(mockResponse);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/my-ns/config');
+      expect(opts.method).toBe('PATCH');
+      const body = JSON.parse(opts.body as string);
+      expect(body.extract_entities).toBe(true);
+      expect(body.entity_types).toEqual(['person', 'org']);
+    });
+
+    it('configureNamespaceNer omits entity_types when not provided', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ extract_entities: false }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      await client.configureNamespaceNer('my-ns', { extract_entities: false });
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body as string);
+      expect(body.extract_entities).toBe(false);
+      expect(body.entity_types).toBeUndefined();
+    });
+
+    it('extractEntities calls POST /v1/memories/extract with text body', async () => {
+      const mockResponse = {
+        entities: [
+          { entity_type: 'person', value: 'Alice', score: 0.95 },
+          { entity_type: 'org', value: 'Dakera', score: 0.88 },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.extractEntities('Alice works at Dakera.');
+      expect(result.entities).toHaveLength(2);
+      expect(result.entities[0].entity_type).toBe('person');
+      expect(result.entities[0].value).toBe('Alice');
+      expect(result.entities[0].score).toBe(0.95);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memories/extract');
+      expect(opts.method).toBe('POST');
+      const body = JSON.parse(opts.body as string);
+      expect(body.text).toBe('Alice works at Dakera.');
+      expect(body.entity_types).toBeUndefined();
+    });
+
+    it('extractEntities includes entity_types when provided', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ entities: [] }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      await client.extractEntities('some text', ['person', 'location']);
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body as string);
+      expect(body.entity_types).toEqual(['person', 'location']);
+    });
+
+    it('memoryEntities calls GET /v1/memory/entities/:id and parses response', async () => {
+      const mockResponse = {
+        memory_id: 'mem-xyz',
+        entities: [
+          { entity_type: 'person', value: 'Bob', score: 0.91 },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.memoryEntities('mem-xyz');
+      expect(result.memory_id).toBe('mem-xyz');
+      expect(result.entities).toHaveLength(1);
+      expect(result.entities[0].value).toBe('Bob');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memory/entities/mem-xyz');
+      expect(opts.method).toBe('GET');
+    });
+  });
 });
