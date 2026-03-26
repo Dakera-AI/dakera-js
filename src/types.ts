@@ -1692,3 +1692,50 @@ export interface FeedbackHealthResponse {
   memory_count: number;
   avg_importance: number;
 }
+
+// =============================================================================
+// Namespace API Keys (SEC-1)
+// =============================================================================
+
+/** Namespace-scoped API key metadata (no secret). Returned by listNamespaceKeys (SEC-1). */
+export interface NamespaceKeyInfo {
+  key_id: string;
+  name: string;
+  namespace: string;
+  created_at: number;
+  active: boolean;
+  expires_at?: number;
+}
+
+/**
+ * Response from POST /v1/namespaces/:namespace/keys (SEC-1).
+ * The `key` field is shown **only once** — store it securely.
+ */
+export interface CreateNamespaceKeyResponse {
+  key_id: string;
+  /** The raw API key. Shown only on creation — cannot be retrieved again. */
+  key: string;
+  name: string;
+  namespace: string;
+  created_at: number;
+  expires_at?: number;
+  warning: string;
+}
+
+/** Response from GET /v1/namespaces/:namespace/keys (SEC-1). */
+export interface ListNamespaceKeysResponse {
+  namespace: string;
+  keys: NamespaceKeyInfo[];
+  total: number;
+}
+
+/** Response from GET /v1/namespaces/:namespace/keys/:key_id/usage (SEC-1). */
+export interface NamespaceKeyUsageResponse {
+  key_id: string;
+  namespace: string;
+  total_requests: number;
+  successful_requests: number;
+  failed_requests: number;
+  bytes_transferred: number;
+  avg_latency_ms: number;
+}

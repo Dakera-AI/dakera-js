@@ -1389,4 +1389,79 @@ describe('DakeraClient', () => {
       expect(opts.method).toBe('GET');
     });
   });
+
+  describe('Namespace API Keys (SEC-1)', () => {
+    const createKeyResponse = {
+      key_id: 'key-abc',
+      key: 'dak_live_xxxxxxxxxxxx',
+      name: 'ci-runner',
+      namespace: 'prod-ns',
+      created_at: 1774000000,
+      expires_at: null,
+      warning: 'Save this key — it will not be shown again.',
+    };
+    const listKeysResponse = {
+      namespace: 'prod-ns',
+      keys: [{ key_id: 'key-abc', name: 'ci-runner', namespace: 'prod-ns', created_at: 1774000000, active: true }],
+      total: 1,
+    };
+    const usageResponse = {
+      key_id: 'key-abc',
+      namespace: 'prod-ns',
+      total_requests: 1000,
+      successful_requests: 980,
+      failed_requests: 20,
+      bytes_transferred: 512000,
+      avg_latency_ms: 12.4,
+    };
+
+    it('createNamespaceKey POSTs to /v1/namespaces/:ns/keys', async () => {
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(createKeyResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }));
+      const result = await client.createNamespaceKey('prod-ns', 'ci-runner');
+      expect(result.key_id).toBe('key-abc');
+      expect(result.key).toBe('dak_live_xxxxxxxxxxxx');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/prod-ns/keys');
+      expect(opts.method).toBe('POST');
+      expect(JSON.parse(opts.body as string).name).toBe('ci-runner');
+    });
+
+    it('createNamespaceKey sends expires_in_days when provided', async () => {
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(createKeyResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }));
+      await client.createNamespaceKey('prod-ns', 'ci-runner', 30);
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(JSON.parse(opts.body as string).expires_in_days).toBe(30);
+    });
+
+    it('listNamespaceKeys GETs /v1/namespaces/:ns/keys', async () => {
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(listKeysResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }));
+      const result = await client.listNamespaceKeys('prod-ns');
+      expect(result.namespace).toBe('prod-ns');
+      expect(result.total).toBe(1);
+      expect(result.keys[0].key_id).toBe('key-abc');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/prod-ns/keys');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('deleteNamespaceKey DELETEs /v1/namespaces/:ns/keys/:key_id', async () => {
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, message: 'Key revoked.' }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }));
+      const result = await client.deleteNamespaceKey('prod-ns', 'key-abc');
+      expect(result.success).toBe(true);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/prod-ns/keys/key-abc');
+      expect(opts.method).toBe('DELETE');
+    });
+
+    it('getNamespaceKeyUsage GETs /v1/namespaces/:ns/keys/:key_id/usage', async () => {
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(usageResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }));
+      const result = await client.getNamespaceKeyUsage('prod-ns', 'key-abc');
+      expect(result.key_id).toBe('key-abc');
+      expect(result.total_requests).toBe(1000);
+      expect(result.avg_latency_ms).toBe(12.4);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/prod-ns/keys/key-abc/usage');
+      expect(opts.method).toBe('GET');
+    });
+  });
 });
