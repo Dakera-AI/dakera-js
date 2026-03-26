@@ -207,6 +207,11 @@ export type {
   FeedbackHistoryResponse,
   AgentFeedbackSummary,
   FeedbackHealthResponse,
+  // Namespace API Keys (SEC-1)
+  NamespaceKeyInfo,
+  CreateNamespaceKeyResponse,
+  ListNamespaceKeysResponse,
+  NamespaceKeyUsageResponse,
 } from './types';
 
 // Errors

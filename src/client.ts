@@ -127,6 +127,9 @@ import type {
   FeedbackHistoryResponse,
   AgentFeedbackSummary,
   FeedbackHealthResponse,
+  CreateNamespaceKeyResponse,
+  ListNamespaceKeysResponse,
+  NamespaceKeyUsageResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -2167,5 +2170,57 @@ export class DakeraClient {
     } catch {
       return null;
     }
+  }
+
+  // ===========================================================================
+  // Namespace API Keys — SEC-1
+  // ===========================================================================
+
+  /**
+   * Create a namespace-scoped API key (SEC-1).
+   *
+   * The `key` field in the response is shown **only once** — store it securely.
+   *
+   * @param namespace     The namespace to scope this key to.
+   * @param name          Human-readable label for the key.
+   * @param expiresInDays Optional expiry in days from now.
+   */
+  async createNamespaceKey(
+    namespace: string,
+    name: string,
+    expiresInDays?: number,
+  ): Promise<CreateNamespaceKeyResponse> {
+    const body: Record<string, unknown> = { name };
+    if (expiresInDays !== undefined) body.expires_in_days = expiresInDays;
+    return this.request<CreateNamespaceKeyResponse>('POST', `/v1/namespaces/${namespace}/keys`, body);
+  }
+
+  /**
+   * List all API keys scoped to a namespace (SEC-1).
+   *
+   * @param namespace  The namespace whose keys to list.
+   */
+  async listNamespaceKeys(namespace: string): Promise<ListNamespaceKeysResponse> {
+    return this.request<ListNamespaceKeysResponse>('GET', `/v1/namespaces/${namespace}/keys`);
+  }
+
+  /**
+   * Revoke a namespace-scoped API key (SEC-1).
+   *
+   * @param namespace  The namespace the key belongs to.
+   * @param keyId      The key to revoke.
+   */
+  async deleteNamespaceKey(namespace: string, keyId: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>('DELETE', `/v1/namespaces/${namespace}/keys/${keyId}`);
+  }
+
+  /**
+   * Get usage statistics for a namespace-scoped API key (SEC-1).
+   *
+   * @param namespace  The namespace the key belongs to.
+   * @param keyId      The key whose usage to retrieve.
+   */
+  async getNamespaceKeyUsage(namespace: string, keyId: string): Promise<NamespaceKeyUsageResponse> {
+    return this.request<NamespaceKeyUsageResponse>('GET', `/v1/namespaces/${namespace}/keys/${keyId}/usage`);
   }
 }
