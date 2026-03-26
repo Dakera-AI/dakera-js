@@ -1496,3 +1496,99 @@ export interface BatchForgetRequest {
 export interface BatchForgetResponse {
   deleted_count: number;
 }
+
+// ============================================================================
+// Memory Knowledge Graph Types (CE-5 / SDK-9)
+// ============================================================================
+
+/**
+ * Edge type for memory knowledge graph relationships (CE-5).
+ *
+ * - `related_to`: Cosine similarity ≥ 0.85 between two memories.
+ * - `shares_entity`: Both memories reference the same named entity (CE-4).
+ * - `precedes`: Temporal ordering — source was created before target.
+ * - `linked_by`: Explicit user/agent-created link.
+ */
+export type EdgeType = 'related_to' | 'shares_entity' | 'precedes' | 'linked_by';
+
+/** A directed edge in the memory knowledge graph. */
+export interface GraphEdge {
+  /** Unique edge identifier. */
+  id: string;
+  /** Source memory ID. */
+  source_id: string;
+  /** Target memory ID. */
+  target_id: string;
+  /** Relationship type between the two memories. */
+  edge_type: EdgeType;
+  /** Edge weight (0.0–1.0). For `related_to` this is the cosine similarity score. */
+  weight: number;
+  /** Unix timestamp of edge creation. */
+  created_at: number;
+}
+
+/** A node (memory) in the knowledge graph traversal result. */
+export interface GraphNode {
+  /** Memory identifier. */
+  memory_id: string;
+  /** First 200 characters of memory content. */
+  content_preview: string;
+  /** Memory importance score. */
+  importance: number;
+  /** Traversal depth from the root node (root = 0). */
+  depth: number;
+}
+
+/** Graph traversal result from `GET /v1/memories/{id}/graph`. */
+export interface MemoryGraph {
+  /** The root memory ID from which traversal started. */
+  root_id: string;
+  /** Maximum traversal depth used. */
+  depth: number;
+  /** All memory nodes reachable within the requested depth. */
+  nodes: GraphNode[];
+  /** All edges connecting the returned nodes. */
+  edges: GraphEdge[];
+}
+
+/** Shortest path result from `GET /v1/memories/{id}/path`. */
+export interface GraphPath {
+  /** Starting memory ID. */
+  source_id: string;
+  /** Destination memory ID. */
+  target_id: string;
+  /** Ordered list of memory IDs from source to target (inclusive). */
+  path: string[];
+  /** Number of edges traversed (`path.length - 1`). -1 if no path exists. */
+  hops: number;
+  /** Edges along the path, in traversal order. */
+  edges: GraphEdge[];
+}
+
+/** Response from `POST /v1/memories/{id}/links`. */
+export interface GraphLinkResponse {
+  /** The newly created edge. */
+  edge: GraphEdge;
+}
+
+/** Agent graph export from `GET /v1/agents/{id}/graph/export`. */
+export interface GraphExport {
+  /** Agent whose graph was exported. */
+  agent_id: string;
+  /** Export format: `json`, `graphml`, or `csv`. */
+  format: 'json' | 'graphml' | 'csv';
+  /** Serialised graph in the requested format. */
+  data: string;
+  /** Total number of memory nodes in the export. */
+  node_count: number;
+  /** Total number of edges in the export. */
+  edge_count: number;
+}
+
+/** Options for `client.memories.graph()`. */
+export interface MemoryGraphOptions {
+  /** Maximum traversal depth (default: 1, max: 3). */
+  depth?: number;
+  /** Filter by edge types. `undefined` returns all types. */
+  types?: EdgeType[];
+}

@@ -184,6 +184,15 @@ export type {
   // Namespace configuration (v0.6.0)
   ConfigureNamespaceRequest,
   ConfigureNamespaceResponse,
+  // Memory Knowledge Graph types (CE-5 / SDK-9)
+  EdgeType,
+  GraphEdge,
+  GraphNode,
+  MemoryGraph,
+  MemoryGraphOptions,
+  GraphPath,
+  GraphLinkResponse,
+  GraphExport,
 } from './types';
 
 // Errors

@@ -113,6 +113,12 @@ import type {
   DecayConfigUpdateResponse,
   DecayStatsResponse,
   OpsStats,
+  EdgeType,
+  GraphExport,
+  GraphLinkResponse,
+  GraphPath,
+  MemoryGraph,
+  MemoryGraphOptions,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1362,6 +1368,78 @@ export class DakeraClient {
   /** Submit feedback on a memory recall */
   async memoryFeedback(agentId: string, request: MemoryFeedbackRequest): Promise<MemoryFeedbackResponse> {
     return this.request<MemoryFeedbackResponse>('POST', `/v1/agents/${agentId}/memories/feedback`, request);
+  }
+
+  // ===========================================================================
+  // Memory Knowledge Graph Operations (CE-5 / SDK-9)
+  // ===========================================================================
+
+  /**
+   * Traverse the knowledge graph from a memory node.
+   *
+   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   *
+   * @param memoryId  Root memory ID to start traversal from.
+   * @param options   `depth` (default 1, max 3) and optional `types` filter.
+   *
+   * @example
+   * const graph = await client.memories.graph(memoryId, { depth: 2 });
+   * console.log(`${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+   */
+  async memoryGraph(memoryId: string, options?: MemoryGraphOptions): Promise<MemoryGraph> {
+    const params = new URLSearchParams();
+    params.set('depth', String(options?.depth ?? 1));
+    if (options?.types?.length) {
+      params.set('types', options.types.join(','));
+    }
+    return this.request<MemoryGraph>('GET', `/v1/memories/${memoryId}/graph?${params}`);
+  }
+
+  /**
+   * Find the shortest path between two memories in the knowledge graph.
+   *
+   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   *
+   * @param sourceId  Starting memory ID.
+   * @param targetId  Destination memory ID.
+   */
+  async memoryPath(sourceId: string, targetId: string): Promise<GraphPath> {
+    return this.request<GraphPath>('GET', `/v1/memories/${sourceId}/path?target=${encodeURIComponent(targetId)}`);
+  }
+
+  /**
+   * Create an explicit edge between two memories.
+   *
+   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   *
+   * @param sourceId  Source memory ID.
+   * @param targetId  Target memory ID.
+   * @param edgeType  Edge type — must be `"linked_by"` for explicit links.
+   */
+  async memoryLink(
+    sourceId: string,
+    targetId: string,
+    edgeType: EdgeType = 'linked_by',
+  ): Promise<GraphLinkResponse> {
+    return this.request<GraphLinkResponse>('POST', `/v1/memories/${sourceId}/links`, {
+      target_id: targetId,
+      edge_type: edgeType,
+    });
+  }
+
+  /**
+   * Export the full knowledge graph for an agent.
+   *
+   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   *
+   * @param agentId  Agent whose graph to export.
+   * @param format   Export format — `"json"` (default), `"graphml"`, or `"csv"`.
+   */
+  async agentGraphExport(
+    agentId: string,
+    format: 'json' | 'graphml' | 'csv' = 'json',
+  ): Promise<GraphExport> {
+    return this.request<GraphExport>('GET', `/v1/agents/${agentId}/graph/export?format=${format}`);
   }
 
   // ===========================================================================
