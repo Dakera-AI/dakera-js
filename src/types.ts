@@ -1616,3 +1616,79 @@ export interface MemoryEntitiesResponse {
   memory_id: string;
   entities: ExtractedEntity[];
 }
+
+// =============================================================================
+// Memory Feedback Loop (INT-1)
+// =============================================================================
+
+/**
+ * Feedback signal for memory active learning (INT-1).
+ *
+ * - `upvote`: Boost importance ×1.15, capped at 1.0.
+ * - `downvote`: Penalise importance ×0.85, floor 0.0.
+ * - `flag`: Mark as irrelevant — sets `decay_flag=true`, no immediate importance change.
+ * - `positive`: Backward-compatible alias for `upvote`.
+ * - `negative`: Backward-compatible alias for `downvote`.
+ */
+export type FeedbackSignal = 'upvote' | 'downvote' | 'flag' | 'positive' | 'negative';
+
+/** A single recorded feedback event stored in memory metadata (INT-1). */
+export interface FeedbackHistoryEntry {
+  /** Feedback signal that was applied. */
+  signal: FeedbackSignal;
+  /** Unix timestamp (seconds) when feedback was submitted. */
+  timestamp: number;
+  /** Memory importance before this feedback was applied. */
+  old_importance: number;
+  /** Memory importance after this feedback was applied. */
+  new_importance: number;
+}
+
+/** Request body for POST /v1/memories/:id/feedback (INT-1). */
+export interface MemoryFeedbackBodyRequest {
+  agent_id: string;
+  signal: FeedbackSignal;
+}
+
+/** Request body for PATCH /v1/memories/:id/importance (INT-1). */
+export interface MemoryImportancePatchRequest {
+  agent_id: string;
+  importance: number;
+}
+
+/** Response from POST /v1/memories/:id/feedback and PATCH /v1/memories/:id/importance (INT-1). */
+export interface FeedbackResponse {
+  /** ID of the memory that was updated. */
+  memory_id: string;
+  /** New importance score after the feedback was applied (0.0–1.0). */
+  new_importance: number;
+  /** The feedback signal that was recorded. */
+  signal: FeedbackSignal;
+}
+
+/** Response from GET /v1/memories/:id/feedback (INT-1). */
+export interface FeedbackHistoryResponse {
+  memory_id: string;
+  /** Ordered list of feedback events (oldest first, capped at 100). */
+  entries: FeedbackHistoryEntry[];
+}
+
+/** Response from GET /v1/agents/:id/feedback/summary (INT-1). */
+export interface AgentFeedbackSummary {
+  agent_id: string;
+  upvotes: number;
+  downvotes: number;
+  flags: number;
+  total_feedback: number;
+  /** Weighted-average importance across all non-expired memories (0.0–1.0). */
+  health_score: number;
+}
+
+/** Response from GET /v1/feedback/health (INT-1). */
+export interface FeedbackHealthResponse {
+  agent_id: string;
+  /** Mean importance of all non-expired memories (0.0–1.0). Higher = healthier. */
+  health_score: number;
+  memory_count: number;
+  avg_importance: number;
+}

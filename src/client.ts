@@ -122,6 +122,11 @@ import type {
   NamespaceNerConfig,
   EntityExtractionResponse,
   MemoryEntitiesResponse,
+  FeedbackSignal,
+  FeedbackResponse,
+  FeedbackHistoryResponse,
+  AgentFeedbackSummary,
+  FeedbackHealthResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1371,6 +1376,67 @@ export class DakeraClient {
   /** Submit feedback on a memory recall */
   async memoryFeedback(agentId: string, request: MemoryFeedbackRequest): Promise<MemoryFeedbackResponse> {
     return this.request<MemoryFeedbackResponse>('POST', `/v1/agents/${agentId}/memories/feedback`, request);
+  }
+
+  // ===========================================================================
+  // Memory Feedback Loop — INT-1
+  // ===========================================================================
+
+  /**
+   * Submit upvote/downvote/flag feedback on a memory (INT-1).
+   *
+   * - `upvote`: boosts importance ×1.15 (capped at 1.0).
+   * - `downvote`: penalises importance ×0.85 (floor 0.0).
+   * - `flag`: marks as irrelevant — accelerates decay on next cycle.
+   *
+   * @param memoryId  The memory to give feedback on.
+   * @param agentId   The agent that owns the memory.
+   * @param signal    Feedback signal.
+   */
+  async feedbackMemory(memoryId: string, agentId: string, signal: FeedbackSignal): Promise<FeedbackResponse> {
+    return this.request<FeedbackResponse>('POST', `/v1/memories/${memoryId}/feedback`, { agent_id: agentId, signal });
+  }
+
+  /**
+   * Get the full feedback history for a memory (INT-1).
+   *
+   * @param memoryId  The memory whose feedback history to retrieve.
+   */
+  async getMemoryFeedbackHistory(memoryId: string): Promise<FeedbackHistoryResponse> {
+    return this.request<FeedbackHistoryResponse>('GET', `/v1/memories/${memoryId}/feedback`);
+  }
+
+  /**
+   * Get aggregate feedback counts and health score for an agent (INT-1).
+   *
+   * @param agentId  The agent to summarise feedback for.
+   */
+  async getAgentFeedbackSummary(agentId: string): Promise<AgentFeedbackSummary> {
+    return this.request<AgentFeedbackSummary>('GET', `/v1/agents/${agentId}/feedback/summary`);
+  }
+
+  /**
+   * Directly override a memory's importance score (INT-1).
+   *
+   * @param memoryId    The memory to update.
+   * @param agentId     The agent that owns the memory.
+   * @param importance  New importance value (0.0–1.0).
+   */
+  async patchMemoryImportance(memoryId: string, agentId: string, importance: number): Promise<FeedbackResponse> {
+    return this.request<FeedbackResponse>('PATCH', `/v1/memories/${memoryId}/importance`, { agent_id: agentId, importance });
+  }
+
+  /**
+   * Get overall feedback health score for an agent (INT-1).
+   *
+   * The health score is the mean importance of all non-expired memories (0.0–1.0).
+   * A higher score indicates a healthier, more relevant memory store.
+   *
+   * @param agentId  The agent to get health score for.
+   */
+  async getFeedbackHealth(agentId: string): Promise<FeedbackHealthResponse> {
+    const params = new URLSearchParams({ agent_id: agentId });
+    return this.request<FeedbackHealthResponse>('GET', `/v1/feedback/health?${params}`);
   }
 
   // ===========================================================================

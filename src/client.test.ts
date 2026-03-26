@@ -1284,4 +1284,109 @@ describe('DakeraClient', () => {
       expect(opts.method).toBe('GET');
     });
   });
+
+  // ===========================================================================
+  // INT-1 Memory Feedback Loop
+  // ===========================================================================
+
+  describe('Memory Feedback Loop (INT-1)', () => {
+    const feedbackResponse = {
+      memory_id: 'mem-abc',
+      new_importance: 0.92,
+      signal: 'upvote' as const,
+    };
+
+    it('feedbackMemory POSTs to /v1/memories/:id/feedback', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(feedbackResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.feedbackMemory('mem-abc', 'agent-1', 'upvote');
+      expect(result.memory_id).toBe('mem-abc');
+      expect(result.new_importance).toBe(0.92);
+      expect(result.signal).toBe('upvote');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memories/mem-abc/feedback');
+      expect(opts.method).toBe('POST');
+      const body = JSON.parse(opts.body as string);
+      expect(body.agent_id).toBe('agent-1');
+      expect(body.signal).toBe('upvote');
+    });
+
+    it('getMemoryFeedbackHistory GETs /v1/memories/:id/feedback', async () => {
+      const historyResponse = {
+        memory_id: 'mem-abc',
+        entries: [
+          { signal: 'upvote', timestamp: 1774000000, old_importance: 0.5, new_importance: 0.575 },
+          { signal: 'downvote', timestamp: 1774001000, old_importance: 0.575, new_importance: 0.489 },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(historyResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.getMemoryFeedbackHistory('mem-abc');
+      expect(result.memory_id).toBe('mem-abc');
+      expect(result.entries).toHaveLength(2);
+      expect(result.entries[0].signal).toBe('upvote');
+      expect(result.entries[1].signal).toBe('downvote');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memories/mem-abc/feedback');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('getAgentFeedbackSummary GETs /v1/agents/:id/feedback/summary', async () => {
+      const summaryResponse = {
+        agent_id: 'agent-1',
+        upvotes: 42,
+        downvotes: 7,
+        flags: 2,
+        total_feedback: 51,
+        health_score: 0.78,
+      };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(summaryResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.getAgentFeedbackSummary('agent-1');
+      expect(result.agent_id).toBe('agent-1');
+      expect(result.upvotes).toBe(42);
+      expect(result.health_score).toBe(0.78);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/agents/agent-1/feedback/summary');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('patchMemoryImportance PATCHes /v1/memories/:id/importance', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(feedbackResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.patchMemoryImportance('mem-abc', 'agent-1', 0.92);
+      expect(result.memory_id).toBe('mem-abc');
+      expect(result.new_importance).toBe(0.92);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memories/mem-abc/importance');
+      expect(opts.method).toBe('PATCH');
+      const body = JSON.parse(opts.body as string);
+      expect(body.agent_id).toBe('agent-1');
+      expect(body.importance).toBe(0.92);
+    });
+
+    it('getFeedbackHealth GETs /v1/feedback/health with agent_id query param', async () => {
+      const healthResponse = {
+        agent_id: 'agent-1',
+        health_score: 0.78,
+        memory_count: 120,
+        avg_importance: 0.72,
+      };
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(healthResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
+      );
+      const result = await client.getFeedbackHealth('agent-1');
+      expect(result.agent_id).toBe('agent-1');
+      expect(result.health_score).toBe(0.78);
+      expect(result.memory_count).toBe(120);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/feedback/health');
+      expect(url).toContain('agent_id=agent-1');
+      expect(opts.method).toBe('GET');
+    });
+  });
 });
