@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-03-26
+
+### Added
+- **Memory Feedback Loop (INT-1):**
+  - `client.feedbackMemory(memoryId, agentId, signal, note?)` — submit feedback
+    (upvote/downvote/flag) for a memory (`POST /v1/memories/{id}/feedback`). Returns
+    `FeedbackResponse`.
+  - `client.patchMemoryImportance(memoryId, agentId, importance)` — directly set a memory's
+    importance score (`PATCH /v1/memories/{id}/importance`). Returns `FeedbackResponse`.
+  - `client.getMemoryFeedbackHistory(memoryId)` — retrieve all feedback events for a memory
+    (`GET /v1/memories/{id}/feedback/history`). Returns `FeedbackHistoryResponse`.
+  - `client.getAgentFeedbackSummary(agentId)` — aggregate feedback counts and health score for
+    an agent (`GET /v1/agents/{id}/feedback/summary`). Returns `AgentFeedbackSummary`.
+  - `client.getFeedbackHealth(agentId)` — health score (mean importance of non-expired
+    memories) for an agent (`GET /v1/feedback/health`). Returns `FeedbackHealthResponse`.
+  - New types: `FeedbackSignal` (enum: `upvote` / `downvote` / `flag`), `FeedbackResponse`,
+    `FeedbackHistoryEntry`, `FeedbackHistoryResponse`, `MemoryFeedbackBody`,
+    `MemoryImportancePatch`, `AgentFeedbackSummary`, `FeedbackHealthResponse` — all exported
+    from the package root.
+
 ## [0.9.0] - 2026-03-26
 
 ### Added
