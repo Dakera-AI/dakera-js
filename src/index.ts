@@ -193,6 +193,11 @@ export type {
   GraphPath,
   GraphLinkResponse,
   GraphExport,
+  // Entity Extraction types (CE-4)
+  NamespaceNerConfig,
+  ExtractedEntity,
+  EntityExtractionResponse,
+  MemoryEntitiesResponse,
 } from './types';
 
 // Errors

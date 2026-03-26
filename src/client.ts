@@ -119,6 +119,9 @@ import type {
   GraphPath,
   MemoryGraph,
   MemoryGraphOptions,
+  NamespaceNerConfig,
+  EntityExtractionResponse,
+  MemoryEntitiesResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1440,6 +1443,62 @@ export class DakeraClient {
     format: 'json' | 'graphml' | 'csv' = 'json',
   ): Promise<GraphExport> {
     return this.request<GraphExport>('GET', `/v1/agents/${agentId}/graph/export?format=${format}`);
+  }
+
+  // =========================================================================
+  // Entity Extraction Operations (CE-4)
+  // =========================================================================
+
+  /**
+   * Configure entity extraction for a namespace.
+   *
+   * @param namespace - Target namespace
+   * @param config - NER configuration (extract_entities flag + entity_types)
+   * @returns Updated namespace config
+   *
+   * @note Requires CE-4 (GLiNER) on the server.
+   */
+  async configureNamespaceNer(
+    namespace: string,
+    config: NamespaceNerConfig,
+  ): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'PATCH',
+      `/v1/namespaces/${namespace}/config`,
+      config,
+    );
+  }
+
+  /**
+   * Extract entities from arbitrary text without storing a memory.
+   *
+   * @param text - Text to extract entities from
+   * @param entityTypes - Entity types to extract (defaults to server defaults)
+   * @returns EntityExtractionResponse with extracted entities
+   *
+   * @note Requires CE-4 (GLiNER) on the server.
+   */
+  async extractEntities(
+    text: string,
+    entityTypes?: string[],
+  ): Promise<EntityExtractionResponse> {
+    const body: Record<string, unknown> = { text };
+    if (entityTypes !== undefined) {
+      body['entity_types'] = entityTypes;
+    }
+    return this.request<EntityExtractionResponse>('POST', '/v1/memories/extract', body);
+  }
+
+  /**
+   * Get entity tags attached to a stored memory.
+   *
+   * @param memoryId - Memory ID to fetch entities for
+   * @returns MemoryEntitiesResponse with entity list
+   *
+   * @note Requires CE-4 (GLiNER) on the server.
+   */
+  async memoryEntities(memoryId: string): Promise<MemoryEntitiesResponse> {
+    return this.request<MemoryEntitiesResponse>('GET', `/v1/memory/entities/${memoryId}`);
   }
 
   // ===========================================================================
