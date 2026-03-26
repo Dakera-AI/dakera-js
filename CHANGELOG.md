@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-26
+
+### Added
+- **Memory Knowledge Graph API (SDK-9 / CE-5 pre-impl):**
+  - `client.memoryGraph(memoryId, depth?, types?)` — returns the graph of memories connected to
+    `memoryId` (`GET /v1/memories/{id}/graph`). Depth and edge-type filters are optional.
+  - `client.memoryPath(sourceId, targetId)` — shortest path between two memory nodes
+    (`GET /v1/memories/{id}/path`).
+  - `client.memoryLink(sourceId, targetId, edgeType)` — create a directed edge between two
+    memories (`POST /v1/memories/{id}/links`).
+  - `client.agentGraphExport(agentId, format?)` — export the full memory graph for an agent
+    as JSON or CSV (`GET /v1/agents/{id}/graph/export`).
+  - New types: `EdgeType`, `GraphEdge`, `GraphNode`, `MemoryGraph`, `GraphPath`,
+    `GraphLinkResponse`, `GraphExport` — all exported from the package root.
+  - **Note:** requires server CE-5 for end-to-end functionality; unit tests use mocked
+    responses and pass fully against the current server (server CE-5 / DAK-1002).
+- **Real-time memory event streaming (SDK-10):**
+  - `client.subscribeAgentMemories(agentId, tagFilter?, reconnect?)` — async generator
+    yielding `MemoryEvent` objects from `GET /v1/events/stream`. Supports tag-based filtering
+    and optional auto-reconnect. Skips the `connected` handshake event automatically.
+- **Security:** bumped `picomatch` to `>=4.0.4` (HIGH ReDoS + MEDIUM method injection).
+
 ## [0.8.6] - 2026-03-25
 
 ### Changed
