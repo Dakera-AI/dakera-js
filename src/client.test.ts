@@ -1120,4 +1120,84 @@ describe('DakeraClient', () => {
       expect(url).toContain('format=graphml');
     });
   });
+
+  describe('subscribeAgentMemories', () => {
+    function makeMemoryEvent(eventType: string, agentId: string, tags?: string[], memoryId?: string) {
+      return { event_type: eventType, agent_id: agentId, timestamp: 1774533000000, ...(memoryId ? { memory_id: memoryId } : {}), ...(tags ? { tags } : {}) };
+    }
+
+    it('filters by agent_id', async () => {
+      const events = [
+        makeMemoryEvent('stored', 'agent-a', undefined, 'm1'),
+        makeMemoryEvent('stored', 'agent-b', undefined, 'm2'),
+        makeMemoryEvent('recalled', 'agent-a', undefined, 'm3'),
+      ];
+      vi.spyOn(client as any, 'streamMemoryEvents').mockImplementation(async function* () {
+        for (const e of events) yield e;
+      });
+      const collected: any[] = [];
+      for await (const ev of client.subscribeAgentMemories('agent-a', { reconnect: false })) {
+        collected.push(ev);
+      }
+      expect(collected).toHaveLength(2);
+      expect(collected.every((e) => e.agent_id === 'agent-a')).toBe(true);
+    });
+
+    it('skips connected handshake', async () => {
+      const events = [
+        makeMemoryEvent('connected', '', undefined, undefined),
+        makeMemoryEvent('stored', 'bot', undefined, 'm1'),
+      ];
+      vi.spyOn(client as any, 'streamMemoryEvents').mockImplementation(async function* () {
+        for (const e of events) yield e;
+      });
+      const collected: any[] = [];
+      for await (const ev of client.subscribeAgentMemories('bot', { reconnect: false })) {
+        collected.push(ev);
+      }
+      expect(collected).toHaveLength(1);
+      expect(collected[0].memory_id).toBe('m1');
+    });
+
+    it('applies tag filter', async () => {
+      const events = [
+        makeMemoryEvent('stored', 'bot', ['important', 'work'], 'm1'),
+        makeMemoryEvent('stored', 'bot', ['trivial'], 'm2'),
+        makeMemoryEvent('stored', 'bot', ['important'], 'm3'),
+      ];
+      vi.spyOn(client as any, 'streamMemoryEvents').mockImplementation(async function* () {
+        for (const e of events) yield e;
+      });
+      const collected: any[] = [];
+      for await (const ev of client.subscribeAgentMemories('bot', { tags: ['important'], reconnect: false })) {
+        collected.push(ev);
+      }
+      expect(new Set(collected.map((e) => e.memory_id))).toEqual(new Set(['m1', 'm3']));
+    });
+
+    it('yields all events when no tags filter', async () => {
+      const events = [
+        makeMemoryEvent('stored', 'bot', ['x'], 'm1'),
+        makeMemoryEvent('forgotten', 'bot', undefined, 'm2'),
+      ];
+      vi.spyOn(client as any, 'streamMemoryEvents').mockImplementation(async function* () {
+        for (const e of events) yield e;
+      });
+      const collected: any[] = [];
+      for await (const ev of client.subscribeAgentMemories('bot', { reconnect: false })) {
+        collected.push(ev);
+      }
+      expect(collected).toHaveLength(2);
+    });
+
+    it('rethrows error when reconnect=false', async () => {
+      vi.spyOn(client as any, 'streamMemoryEvents').mockImplementation(async function* () {
+        throw new Error('stream dropped');
+        yield;
+      });
+      await expect(async () => {
+        for await (const _ of client.subscribeAgentMemories('bot', { reconnect: false })) { /* */ }
+      }).rejects.toThrow('stream dropped');
+    });
+  });
 });

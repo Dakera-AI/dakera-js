@@ -1841,6 +1841,54 @@ export class DakeraClient {
   }
 
   /**
+   * Subscribe to real-time memory lifecycle events for a specific agent.
+   *
+   * Wraps `GET /v1/events/stream`, filtering events by `agentId` and
+   * optional `tags`.  Reconnects automatically on connection drop when
+   * `reconnect` is `true`.
+   *
+   * Requires a Read-scoped API key.
+   *
+   * @param agentId - Agent whose events to receive.
+   * @param options.tags - Optional tag filter: only events whose tags overlap
+   *   this array are yielded.
+   * @param options.reconnect - Auto-reconnect on connection drop. Default `true`.
+   * @param options.reconnectDelay - Milliseconds to wait between reconnection
+   *   attempts. Default `1000`.
+   *
+   * @example
+   * ```ts
+   * for await (const event of client.subscribeAgentMemories('my-bot', { tags: ['important'] })) {
+   *   console.log(event.event_type, event.memory_id);
+   * }
+   * ```
+   */
+  async *subscribeAgentMemories(
+    agentId: string,
+    options: { tags?: string[]; reconnect?: boolean; reconnectDelay?: number } = {},
+  ): AsyncGenerator<MemoryEvent> {
+    const { tags, reconnect = true, reconnectDelay = 1000 } = options;
+    while (true) {
+      try {
+        for await (const event of this.streamMemoryEvents()) {
+          if (event.event_type === 'connected') continue;
+          if (event.agent_id !== agentId) continue;
+          if (tags && tags.length > 0) {
+            const eventTags: string[] = event.tags ?? [];
+            if (!tags.some((t) => eventTags.includes(t))) continue;
+          }
+          yield event;
+        }
+        // Stream closed cleanly.
+        if (!reconnect) return;
+      } catch (err) {
+        if (!reconnect) throw err;
+      }
+      await new Promise<void>((r) => setTimeout(r, reconnectDelay));
+    }
+  }
+
+  /**
    * Return a URL with `?api_key=<key>` appended for use with browser-native
    * `EventSource`, which cannot send custom request headers.
    *
