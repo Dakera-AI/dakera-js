@@ -1464,4 +1464,44 @@ describe('DakeraClient', () => {
       expect(opts.method).toBe('GET');
     });
   });
+
+  describe('opsMetrics (INFRA-3)', () => {
+    const PROMETHEUS_TEXT = [
+      '# HELP dakera_memory_store_total Total memory store operations',
+      '# TYPE dakera_memory_store_total counter',
+      'dakera_memory_store_total 42',
+      '# HELP dakera_memory_count Current stored memory count',
+      '# TYPE dakera_memory_count gauge',
+      'dakera_memory_count 1024',
+    ].join('\n');
+
+    it('GETs /v1/ops/metrics and returns Prometheus text body', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(PROMETHEUS_TEXT, {
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/plain; version=0.0.4; charset=utf-8' }),
+        })
+      );
+
+      const result = await client.opsMetrics();
+
+      expect(typeof result).toBe('string');
+      expect(result).toContain('dakera_memory_store_total');
+      expect(result).toContain('dakera_memory_count 1024');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/ops/metrics');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('throws AuthorizationError on 403 (insufficient scope)', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'Admin scope required', code: 'AUTHORIZATION_ERROR' }), {
+          status: 403,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+
+      await expect(client.opsMetrics()).rejects.toThrow('Admin scope required');
+    });
+  });
 });

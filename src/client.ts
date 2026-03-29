@@ -1733,6 +1733,13 @@ export class DakeraClient {
     return this.request<OpsStats>('GET', '/v1/ops/stats');
   }
 
+  /** Get Prometheus metrics in text exposition format (INFRA-3).
+   *  Requires Admin scope. Returns the raw Prometheus text exposition
+   *  format string suitable for scraping by a Prometheus server. */
+  async opsMetrics(): Promise<string> {
+    return this.request<string>('GET', '/v1/ops/metrics');
+  }
+
   /** Get cluster status */
   async clusterStatus(): Promise<ClusterStatus> {
     return this.request<ClusterStatus>('GET', '/v1/admin/cluster/status');
