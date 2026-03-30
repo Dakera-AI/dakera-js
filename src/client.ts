@@ -139,6 +139,9 @@ import type {
   // EXT-1
   ExtractionResult,
   ExtractionProviderInfo,
+  // SEC-3
+  RotateEncryptionKeyRequest,
+  RotateEncryptionKeyResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1873,6 +1876,29 @@ export class DakeraClient {
   /** Get decay activity counters and last-cycle snapshot (DECAY-2). Requires Admin scope. */
   async decayStats(): Promise<DecayStatsResponse> {
     return this.request<DecayStatsResponse>('GET', '/v1/admin/decay/stats');
+  }
+
+  /**
+   * Re-encrypt all memory content blobs with a new AES-256-GCM key (SEC-3).
+   *
+   * After this call the new key is active in the running process.
+   * The operator must update `DAKERA_ENCRYPTION_KEY` and restart to make the
+   * rotation durable across restarts. Requires Admin scope.
+   *
+   * @param newKey - New passphrase or 64-char hex key.
+   * @param namespace - Rotate only this namespace. Omit to rotate all.
+   */
+  async rotateEncryptionKey(
+    newKey: string,
+    namespace?: string,
+  ): Promise<RotateEncryptionKeyResponse> {
+    const body: RotateEncryptionKeyRequest = { new_key: newKey };
+    if (namespace !== undefined) body.namespace = namespace;
+    return this.request<RotateEncryptionKeyResponse>(
+      'POST',
+      '/v1/admin/encryption/rotate-key',
+      body,
+    );
   }
 
   // ===========================================================================

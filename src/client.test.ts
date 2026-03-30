@@ -1504,4 +1504,40 @@ describe('DakeraClient', () => {
       await expect(client.opsMetrics()).rejects.toThrow('Admin scope required');
     });
   });
+
+  describe('rotateEncryptionKey (SEC-3)', () => {
+    it('POSTs /v1/admin/encryption/rotate-key and returns counts', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ rotated: 42, skipped: 3, namespaces: ['ns-a', 'ns-b'] }),
+          { status: 200, headers: new Headers({ 'content-type': 'application/json' }) },
+        ),
+      );
+
+      const result = await client.rotateEncryptionKey('new-secret-passphrase');
+
+      expect(result.rotated).toBe(42);
+      expect(result.skipped).toBe(3);
+      expect(result.namespaces).toEqual(['ns-a', 'ns-b']);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/encryption/rotate-key');
+      expect(opts.method).toBe('POST');
+    });
+
+    it('sends namespace in body when provided', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ rotated: 5, skipped: 0, namespaces: ['my-ns'] }),
+          { status: 200, headers: new Headers({ 'content-type': 'application/json' }) },
+        ),
+      );
+
+      await client.rotateEncryptionKey('new-key', 'my-ns');
+
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body as string);
+      expect(body.new_key).toBe('new-key');
+      expect(body.namespace).toBe('my-ns');
+    });
+  });
 });
