@@ -142,6 +142,9 @@ import type {
   // SEC-3
   RotateEncryptionKeyRequest,
   RotateEncryptionKeyResponse,
+  // ODE-2
+  ExtractEntitiesRequest,
+  ExtractEntitiesResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -173,6 +176,8 @@ export class DakeraClient {
   private readonly connectTimeout: number;
   private readonly retryConfig: Required<import('./types').RetryConfig>;
   private readonly headers: Record<string, string>;
+  /** ODE-2: base URL of the dakera-ode sidecar. */
+  private readonly odeUrl?: string;
   /** OPS-1: rate-limit headers from the most recent API response. */
   private _lastRateLimitHeaders: RateLimitHeaders | null = null;
 
@@ -185,6 +190,7 @@ export class DakeraClient {
     this.apiKey = options.apiKey;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.connectTimeout = options.connectTimeout ?? this.timeout;
+    this.odeUrl = options.odeUrl?.replace(/\/$/, '');
 
     const rb = options.retryBackoff ?? {};
     this.retryConfig = {
@@ -2442,5 +2448,62 @@ export class DakeraClient {
     const body: Record<string, unknown> = { provider };
     if (model !== undefined) body.model = model;
     return this.request<Record<string, unknown>>('PATCH', `/v1/namespaces/${encodeURIComponent(namespace)}/extractor`, body);
+  }
+
+  // ===========================================================================
+  // ODE-2: GLiNER Entity Extraction (dakera-ode sidecar)
+  // ===========================================================================
+
+  /**
+   * Extract named entities from text using the GLiNER sidecar (ODE-2).
+   *
+   * Calls `POST /ode/extract` on the dakera-ode sidecar. Requires
+   * `odeUrl` to be configured in {@link ClientOptions}.
+   *
+   * Unlike `extractEntities` (CE-4, server-side NER), this method calls the
+   * dedicated GLiNER sidecar and returns character offsets, model name, and
+   * processing time.
+   *
+   * @param content      The text to extract entities from.
+   * @param agentId      Agent context for the extraction.
+   * @param memoryId     Optional memory ID to associate with the extraction.
+   * @param entityTypes  Optional list of entity type labels to extract.
+   *                     When omitted the ODE sidecar uses its default set.
+   * @throws {Error} If `odeUrl` is not configured.
+   */
+  async odeExtractEntities(
+    content: string,
+    agentId: string,
+    memoryId?: string,
+    entityTypes?: string[],
+  ): Promise<ExtractEntitiesResponse> {
+    if (!this.odeUrl) {
+      throw new Error(
+        'odeUrl must be configured to use extractEntities(). ' +
+        "Pass odeUrl: 'http://localhost:8080' in ClientOptions.",
+      );
+    }
+    const body: ExtractEntitiesRequest = { content, agent_id: agentId };
+    if (memoryId !== undefined) body.memory_id = memoryId;
+    if (entityTypes !== undefined) body.entity_types = entityTypes;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const resp = await fetch(`${this.odeUrl}/ode/extract`, {
+        method: 'POST',
+        headers: { ...this.headers },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`ODE sidecar returned ${resp.status}: ${text}`);
+      }
+      return resp.json() as Promise<ExtractEntitiesResponse>;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
