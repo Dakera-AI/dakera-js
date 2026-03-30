@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-03-30
+
+### Added
+- **Memory Import/Export (DX-1):**
+  - `importMemories(data, format?, agentId?, namespace?)` — import memories from
+    Mem0, Zep, JSONL, or CSV format (`POST /v1/import`). Returns
+    `MemoryImportResponse` with counts and errors.
+  - `exportMemories(format?, agentId?, namespace?, limit?)` — export memories to
+    a portable format (`GET /v1/export`). Returns `MemoryExportResponse`.
+  - New types: `MemoryImportResponse`, `MemoryExportResponse`.
+- **Business-Event Audit Log (OBS-1):**
+  - `listAuditEvents(opts?)` — paginated audit log query (`GET /v1/audit`).
+    Returns `AuditListResponse`.
+  - `streamAuditEvents(opts?)` — live SSE stream of audit events
+    (`GET /v1/audit/stream`). Yields `DakeraEvent` objects.
+  - `exportAudit(opts?)` — bulk export audit entries (`POST /v1/audit/export`).
+    Returns `AuditExportResponse`.
+  - New types: `AuditEvent`, `AuditListResponse`, `AuditExportResponse`.
+- **DBSCAN Adaptive Consolidation (CE-6):** `ConsolidateRequest` now accepts
+  optional `config: ConsolidationConfig` (algorithm, min_samples, eps).
+  `ConsolidateResponse` may include a `log: ConsolidationLogEntry[]` field.
+  New types: `ConsolidationConfig`, `ConsolidationLogEntry`.
+- **External Extraction Providers (EXT-1):**
+  - `extractText(text, namespace?, provider?, model?)` — extract entities via
+    a pluggable provider (`POST /v1/extract`). Providers: `gliner` (bundled
+    zero-config), `openai`, `anthropic`, `openrouter`, `ollama`. Returns
+    `ExtractionResult`.
+  - `listExtractProviders()` — list available providers and models
+    (`GET /v1/extract/providers`). Returns `ExtractionProviderInfo[]`.
+  - `configureNamespaceExtractor(namespace, provider, model?)` — set namespace
+    default extractor (`PATCH /v1/namespaces/{ns}/extractor`).
+  - New types: `ExtractionResult`, `ExtractionProviderInfo`.
+- **Redis Health (OPS-3):** `clusterStatus()` response includes `redis_healthy`
+  boolean field.
+- **Cluster Env Aliases (DIST-1):** Documented `DAKERA_CLUSTER_NODE_ID`,
+  `SEED_NODES`, `BIND_ADDR` server environment variables.
+- **Memory Encryption (SEC-3):** Server supports AES-256-GCM at-rest encryption
+  via `DAKERA_ENCRYPTION_KEY` — transparent to SDK clients.
+
+## [0.9.3] - 2026-03-29
+
 ### Added
 - **Prometheus Metrics (INFRA-3):** `opsMetrics()` — returns the raw Prometheus
   text exposition format string from `GET /v1/ops/metrics` (Admin scope).
