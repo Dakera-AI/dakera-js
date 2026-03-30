@@ -130,6 +130,15 @@ import type {
   CreateNamespaceKeyResponse,
   ListNamespaceKeysResponse,
   NamespaceKeyUsageResponse,
+  // DX-1
+  MemoryImportResponse,
+  MemoryExportResponse,
+  // OBS-1
+  AuditListResponse,
+  AuditExportResponse,
+  // EXT-1
+  ExtractionResult,
+  ExtractionProviderInfo,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -2229,5 +2238,183 @@ export class DakeraClient {
    */
   async getNamespaceKeyUsage(namespace: string, keyId: string): Promise<NamespaceKeyUsageResponse> {
     return this.request<NamespaceKeyUsageResponse>('GET', `/v1/namespaces/${namespace}/keys/${keyId}/usage`);
+  }
+
+  // ===========================================================================
+  // DX-1: Memory Import / Export
+  // ===========================================================================
+
+  /**
+   * Import memories from an external format (DX-1).
+   *
+   * @param data     Serialised memories (list of objects for jsonl/mem0/zep, or a CSV string).
+   * @param format   One of `"jsonl"`, `"mem0"`, `"zep"`, `"csv"`. Defaults to `"jsonl"`.
+   * @param agentId  Assign all imported memories to this agent.
+   * @param namespace Target namespace (defaults to the client's configured namespace).
+   */
+  async importMemories(
+    data: unknown,
+    format: 'jsonl' | 'mem0' | 'zep' | 'csv' = 'jsonl',
+    agentId?: string,
+    namespace?: string,
+  ): Promise<MemoryImportResponse> {
+    const body: Record<string, unknown> = { data, format };
+    if (agentId !== undefined) body.agent_id = agentId;
+    if (namespace !== undefined) body.namespace = namespace;
+    return this.request<MemoryImportResponse>('POST', '/v1/import', body);
+  }
+
+  /**
+   * Export memories in a portable format (DX-1).
+   *
+   * @param format    One of `"jsonl"`, `"mem0"`, `"zep"`, `"csv"`. Defaults to `"jsonl"`.
+   * @param agentId   Export only memories for this agent.
+   * @param namespace Source namespace (defaults to client namespace).
+   * @param limit     Maximum number of memories to export.
+   */
+  async exportMemories(
+    format: 'jsonl' | 'mem0' | 'zep' | 'csv' = 'jsonl',
+    agentId?: string,
+    namespace?: string,
+    limit?: number,
+  ): Promise<MemoryExportResponse> {
+    const params = new URLSearchParams({ format });
+    if (agentId !== undefined) params.set('agent_id', agentId);
+    if (namespace !== undefined) params.set('namespace', namespace);
+    if (limit !== undefined) params.set('limit', String(limit));
+    return this.request<MemoryExportResponse>('GET', `/v1/export?${params}`);
+  }
+
+  // ===========================================================================
+  // OBS-1: Business-Event Audit Log
+  // ===========================================================================
+
+  /**
+   * List paginated audit log entries (OBS-1).
+   *
+   * @param agentId   Filter to events from this agent.
+   * @param eventType Filter to a specific event type string.
+   * @param fromTs    Unix timestamp lower bound (inclusive).
+   * @param toTs      Unix timestamp upper bound (exclusive).
+   * @param limit     Maximum number of events to return.
+   * @param cursor    Pagination cursor from a previous response.
+   */
+  async listAuditEvents(opts?: {
+    agentId?: string;
+    eventType?: string;
+    fromTs?: number;
+    toTs?: number;
+    limit?: number;
+    cursor?: string;
+  }): Promise<AuditListResponse> {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set('agent_id', opts.agentId);
+    if (opts?.eventType) params.set('event_type', opts.eventType);
+    if (opts?.fromTs !== undefined) params.set('from', String(opts.fromTs));
+    if (opts?.toTs !== undefined) params.set('to', String(opts.toTs));
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    const qs = params.toString();
+    return this.request<AuditListResponse>('GET', qs ? `/v1/audit?${qs}` : '/v1/audit');
+  }
+
+  /**
+   * Stream live audit events via SSE (OBS-1).
+   *
+   * Opens a long-lived connection to `GET /v1/audit/stream` and yields
+   * {@link DakeraEvent} objects as they arrive.
+   *
+   * @param agentId   Scope the stream to a specific agent.
+   * @param eventType Scope the stream to a specific event type.
+   */
+  async *streamAuditEvents(opts?: {
+    agentId?: string;
+    eventType?: string;
+  }): AsyncGenerator<DakeraEvent> {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set('agent_id', opts.agentId);
+    if (opts?.eventType) params.set('event_type', opts.eventType);
+    const qs = params.toString();
+    const url = `${this.baseUrl}/v1/audit/stream${qs ? `?${qs}` : ''}`;
+    yield* this._streamSse(url);
+  }
+
+  /**
+   * Bulk-export audit log entries (OBS-1).
+   *
+   * @param format    `"jsonl"` (default) or `"csv"`.
+   * @param agentId   Filter to a specific agent.
+   * @param eventType Filter to a specific event type.
+   * @param fromTs    Unix timestamp lower bound.
+   * @param toTs      Unix timestamp upper bound.
+   */
+  async exportAudit(opts?: {
+    format?: 'jsonl' | 'csv';
+    agentId?: string;
+    eventType?: string;
+    fromTs?: number;
+    toTs?: number;
+  }): Promise<AuditExportResponse> {
+    const body: Record<string, unknown> = { format: opts?.format ?? 'jsonl' };
+    if (opts?.agentId) body.agent_id = opts.agentId;
+    if (opts?.eventType) body.event_type = opts.eventType;
+    if (opts?.fromTs !== undefined) body.from = opts.fromTs;
+    if (opts?.toTs !== undefined) body.to = opts.toTs;
+    return this.request<AuditExportResponse>('POST', '/v1/audit/export', body);
+  }
+
+  // ===========================================================================
+  // EXT-1: External Extraction Providers
+  // ===========================================================================
+
+  /**
+   * Extract entities from text using a pluggable provider (EXT-1).
+   *
+   * Provider hierarchy: per-request override > namespace default > GLiNER (bundled).
+   *
+   * @param text      Input text to extract from.
+   * @param namespace Namespace whose default extractor to inherit.
+   * @param provider  Override provider: `"gliner"`, `"openai"`, `"anthropic"`,
+   *                  `"openrouter"`, or `"ollama"`.
+   * @param model     Override model within the chosen provider.
+   */
+  async extractText(
+    text: string,
+    namespace?: string,
+    provider?: 'gliner' | 'openai' | 'anthropic' | 'openrouter' | 'ollama',
+    model?: string,
+  ): Promise<ExtractionResult> {
+    const body: Record<string, unknown> = { text };
+    if (namespace !== undefined) body.namespace = namespace;
+    if (provider !== undefined) body.provider = provider;
+    if (model !== undefined) body.model = model;
+    return this.request<ExtractionResult>('POST', '/v1/extract', body);
+  }
+
+  /**
+   * List available extraction providers and their supported models (EXT-1).
+   */
+  async listExtractProviders(): Promise<ExtractionProviderInfo[]> {
+    const result = await this.request<ExtractionProviderInfo[] | { providers: ExtractionProviderInfo[] }>(
+      'GET', '/v1/extract/providers',
+    );
+    return Array.isArray(result) ? result : result.providers;
+  }
+
+  /**
+   * Set the default extraction provider for a namespace (EXT-1).
+   *
+   * @param namespace The namespace to configure.
+   * @param provider  Default provider.
+   * @param model     Default model within the provider (optional).
+   */
+  async configureNamespaceExtractor(
+    namespace: string,
+    provider: 'gliner' | 'openai' | 'anthropic' | 'openrouter' | 'ollama',
+    model?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { provider };
+    if (model !== undefined) body.model = model;
+    return this.request<Record<string, unknown>>('PATCH', `/v1/namespaces/${encodeURIComponent(namespace)}/extractor`, body);
   }
 }

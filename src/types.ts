@@ -590,6 +590,8 @@ export interface ConsolidateRequest {
   threshold?: number;
   /** Dry run mode */
   dry_run?: boolean;
+  /** Optional DBSCAN algorithm config (CE-6) */
+  config?: ConsolidationConfig;
 }
 
 /** Response from consolidation */
@@ -600,6 +602,8 @@ export interface ConsolidateResponse {
   removed_count: number;
   /** IDs of new consolidated memories */
   new_memories: MemoryId[];
+  /** Step-by-step consolidation log (CE-6) */
+  log?: ConsolidationLogEntry[];
 }
 
 /** Request for memory feedback */
@@ -1738,4 +1742,91 @@ export interface NamespaceKeyUsageResponse {
   failed_requests: number;
   bytes_transferred: number;
   avg_latency_ms: number;
+}
+
+// =============================================================================
+// CE-6: DBSCAN Adaptive Consolidation
+// =============================================================================
+
+/** Algorithm config for DBSCAN adaptive consolidation (CE-6). */
+export interface ConsolidationConfig {
+  /** Clustering algorithm: `"dbscan"` (default) or `"greedy"`. */
+  algorithm?: 'dbscan' | 'greedy';
+  /** Minimum cluster samples for DBSCAN. */
+  min_samples?: number;
+  /** Epsilon distance parameter for DBSCAN. */
+  eps?: number;
+}
+
+/** One step in the consolidation execution log (CE-6). */
+export interface ConsolidationLogEntry {
+  step: string;
+  memories_before: number;
+  memories_after: number;
+  duration_ms: number;
+}
+
+// =============================================================================
+// DX-1: Memory Import / Export
+// =============================================================================
+
+/** Response from POST /v1/import (DX-1). */
+export interface MemoryImportResponse {
+  imported_count: number;
+  skipped_count: number;
+  errors: string[];
+}
+
+/** Response from GET /v1/export (DX-1). */
+export interface MemoryExportResponse {
+  data: Record<string, unknown>[];
+  format: string;
+  count: number;
+}
+
+// =============================================================================
+// OBS-1: Business-Event Audit Log
+// =============================================================================
+
+/** A single business-event entry from the audit log (OBS-1). */
+export interface AuditEvent {
+  id: string;
+  event_type: string;
+  agent_id?: string;
+  namespace?: string;
+  timestamp: number;
+  details: Record<string, unknown>;
+}
+
+/** Response from GET /v1/audit (OBS-1). */
+export interface AuditListResponse {
+  events: AuditEvent[];
+  total: number;
+  cursor?: string;
+}
+
+/** Response from POST /v1/audit/export (OBS-1). */
+export interface AuditExportResponse {
+  data: string;
+  format: string;
+  count: number;
+}
+
+// =============================================================================
+// EXT-1: External Extraction Providers
+// =============================================================================
+
+/** Result from POST /v1/extract (EXT-1). */
+export interface ExtractionResult {
+  entities: Record<string, unknown>[];
+  provider: string;
+  model?: string;
+  duration_ms: number;
+}
+
+/** Metadata for an available extraction provider (EXT-1). */
+export interface ExtractionProviderInfo {
+  name: string;
+  available: boolean;
+  models: string[];
 }

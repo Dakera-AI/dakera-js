@@ -212,6 +212,19 @@ export type {
   CreateNamespaceKeyResponse,
   ListNamespaceKeysResponse,
   NamespaceKeyUsageResponse,
+  // DBSCAN Adaptive Consolidation (CE-6)
+  ConsolidationConfig,
+  ConsolidationLogEntry,
+  // Memory Import / Export (DX-1)
+  MemoryImportResponse,
+  MemoryExportResponse,
+  // Business-Event Audit Log (OBS-1)
+  AuditEvent,
+  AuditListResponse,
+  AuditExportResponse,
+  // External Extraction Providers (EXT-1)
+  ExtractionResult,
+  ExtractionProviderInfo,
 } from './types';
 
 // Errors
