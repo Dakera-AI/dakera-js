@@ -1830,3 +1830,22 @@ export interface ExtractionProviderInfo {
   available: boolean;
   models: string[];
 }
+
+// =============================================================================
+// SEC-3: AES-256-GCM Encryption Key Rotation
+// =============================================================================
+
+/** Request body for POST /v1/admin/encryption/rotate-key (SEC-3). */
+export interface RotateEncryptionKeyRequest {
+  /** New passphrase or 64-char hex key to rotate to. */
+  new_key: string;
+  /** If set, rotate only memories in this namespace. Omit to rotate all. */
+  namespace?: string;
+}
+
+/** Response from POST /v1/admin/encryption/rotate-key (SEC-3). */
+export interface RotateEncryptionKeyResponse {
+  rotated: number;
+  skipped: number;
+  namespaces: string[];
+}

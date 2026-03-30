@@ -225,6 +225,9 @@ export type {
   // External Extraction Providers (EXT-1)
   ExtractionResult,
   ExtractionProviderInfo,
+  // AES-256-GCM Encryption Key Rotation (SEC-3)
+  RotateEncryptionKeyRequest,
+  RotateEncryptionKeyResponse,
 } from './types';
 
 // Errors
