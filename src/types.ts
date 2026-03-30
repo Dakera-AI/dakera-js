@@ -320,6 +320,9 @@ export interface ClientOptions {
   retryBackoff?: RetryConfig;
   /** Additional headers */
   headers?: Record<string, string>;
+  /** Base URL of the dakera-ode sidecar (e.g. `"http://localhost:8080"`).
+   *  Required to call {@link DakeraClient.extractEntities}. */
+  odeUrl?: string;
 }
 
 // =============================================================================
@@ -1848,4 +1851,44 @@ export interface RotateEncryptionKeyResponse {
   rotated: number;
   skipped: number;
   namespaces: string[];
+}
+
+// =============================================================================
+// ODE-2: GLiNER Entity Extraction (dakera-ode sidecar)
+// =============================================================================
+
+/** A single entity extracted by the GLiNER model (ODE-2). */
+export interface OdeEntity {
+  /** Span text as it appears in the input. */
+  text: string;
+  /** Entity type label (e.g. `"person"`, `"organization"`). */
+  label: string;
+  /** Start character offset (inclusive) within the input text. */
+  start: number;
+  /** End character offset (exclusive) within the input text. */
+  end: number;
+  /** Confidence score in the range [0, 1]. */
+  score: number;
+}
+
+/** Request body for POST /ode/extract (ODE-2). */
+export interface ExtractEntitiesRequest {
+  /** The text to extract entities from. */
+  content: string;
+  /** Agent context for the extraction. */
+  agent_id: string;
+  /** Optional memory ID to associate with the extraction. */
+  memory_id?: string;
+  /** Optional list of entity type labels to extract. */
+  entity_types?: string[];
+}
+
+/** Response from POST /ode/extract on the ODE sidecar (ODE-2). */
+export interface ExtractEntitiesResponse {
+  /** Extracted entities ordered by their start offset. */
+  entities: OdeEntity[];
+  /** GLiNER model variant used for extraction. */
+  model: string;
+  /** Wall-clock time taken by the ODE sidecar in milliseconds. */
+  processing_time_ms: number;
 }

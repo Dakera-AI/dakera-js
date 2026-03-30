@@ -1540,4 +1540,69 @@ describe('DakeraClient', () => {
       expect(body.namespace).toBe('my-ns');
     });
   });
+
+  describe('ODE-2: GLiNER Entity Extraction (odeExtractEntities)', () => {
+    const ODE_RESPONSE = {
+      entities: [
+        { text: 'Alice', label: 'person', start: 0, end: 5, score: 0.97 },
+        { text: 'Paris', label: 'location', start: 16, end: 21, score: 0.92 },
+      ],
+      model: 'gliner-multi-v2.1',
+      processing_time_ms: 34,
+    };
+
+    it('odeExtractEntities POSTs to /ode/extract on odeUrl', async () => {
+      const odeClient = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        odeUrl: 'http://localhost:8080',
+      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(ODE_RESPONSE), {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        }),
+      );
+
+      const result = await odeClient.odeExtractEntities('Alice lives in Paris.', 'agent-1');
+
+      expect(result.entities).toHaveLength(2);
+      expect(result.entities[0].text).toBe('Alice');
+      expect(result.entities[0].label).toBe('person');
+      expect(result.entities[1].text).toBe('Paris');
+      expect(result.model).toBe('gliner-multi-v2.1');
+      expect(result.processing_time_ms).toBe(34);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('http://localhost:8080/ode/extract');
+      expect(opts.method).toBe('POST');
+      const body = JSON.parse(opts.body as string);
+      expect(body.content).toBe('Alice lives in Paris.');
+      expect(body.agent_id).toBe('agent-1');
+    });
+
+    it('odeExtractEntities includes optional fields when provided', async () => {
+      const odeClient = new DakeraClient({
+        baseUrl: 'http://localhost:3000',
+        odeUrl: 'http://localhost:8080',
+      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(ODE_RESPONSE), {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        }),
+      );
+
+      await odeClient.odeExtractEntities('Alice works at Dakera.', 'agent-2', 'mem-abc', ['person', 'org']);
+
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body as string);
+      expect(body.memory_id).toBe('mem-abc');
+      expect(body.entity_types).toEqual(['person', 'org']);
+    });
+
+    it('odeExtractEntities throws when odeUrl is not configured', async () => {
+      await expect(
+        client.odeExtractEntities('text', 'agent-1'),
+      ).rejects.toThrow('odeUrl');
+    });
+  });
 });

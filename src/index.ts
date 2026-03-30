@@ -228,6 +228,10 @@ export type {
   // AES-256-GCM Encryption Key Rotation (SEC-3)
   RotateEncryptionKeyRequest,
   RotateEncryptionKeyResponse,
+  // GLiNER Entity Extraction via ODE sidecar (ODE-2)
+  OdeEntity,
+  ExtractEntitiesRequest,
+  ExtractEntitiesResponse,
 } from './types';
 
 // Errors
