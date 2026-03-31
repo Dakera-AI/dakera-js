@@ -1335,15 +1335,19 @@ export class DakeraClient {
    * @param options.include_associated - COG-2: traverse KG depth-1 and include
    *   associatively linked memories in `associated_memories` (default: false)
    * @param options.associated_memories_cap - COG-2: max associated memories (default: 10, max: 10)
+   * @param options.since - CE-7: only recall memories created at or after this ISO-8601 timestamp
+   * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
    * @returns RecallResponse with `memories` and optionally `associated_memories`
    */
-  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; since?: string; until?: string }): Promise<RecallResponse> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
     if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
     if (options?.include_associated) body['include_associated'] = true;
     if (options?.associated_memories_cap !== undefined) body['associated_memories_cap'] = options.associated_memories_cap;
+    if (options?.since !== undefined) body['since'] = options.since;
+    if (options?.until !== undefined) body['until'] = options.until;
     return this.request<RecallResponse>('POST', `/v1/agents/${agentId}/memories/recall`, body);
   }
 
