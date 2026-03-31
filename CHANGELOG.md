@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-03-31
+
+### Added
+- **COG-1: Cognitive Memory Lifecycle bindings:**
+  - `getMemoryPolicy(namespace)` — retrieve the memory lifecycle policy
+    (`GET /v1/namespaces/{namespace}/memory_policy`). Returns `MemoryPolicy`.
+  - `setMemoryPolicy(namespace, policy)` — set the lifecycle policy
+    (`PUT /v1/namespaces/{namespace}/memory_policy`).
+  - New types: `MemoryPolicy`, `DecayStrategyName` (extends existing
+    `"exponential" | "linear" | "step"` with `"power_law"`, `"logarithmic"`,
+    `"flat"` — the three new COG-1 per-type decay strategies).
+
 ## [0.9.7] - 2026-03-31
 
 ### Added

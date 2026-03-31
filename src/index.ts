@@ -236,6 +236,9 @@ export type {
   OdeEntity,
   ExtractEntitiesRequest,
   ExtractEntitiesResponse,
+  // COG-1: Cognitive Memory Lifecycle
+  DecayStrategyName,
+  MemoryPolicy,
 } from './types';
 
 // Errors
