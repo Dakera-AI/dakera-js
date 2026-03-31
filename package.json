@@ -1,6 +1,6 @@
 {
   "name": "@dakera-ai/dakera",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "TypeScript/JavaScript SDK for Dakera AI memory platform",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
