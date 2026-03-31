@@ -1592,6 +1592,50 @@ export interface GraphExport {
   edge_count: number;
 }
 
+// ============================================================================
+// KG-2: Graph Query & Export Types
+// ============================================================================
+
+/** Response from `GET /v1/knowledge/query` (KG-2). */
+export interface KgQueryResponse {
+  /** Agent whose graph was queried. */
+  agent_id: string;
+  /** Number of unique memory node IDs referenced by the returned edges. */
+  node_count: number;
+  /** Number of edges returned. */
+  edge_count: number;
+  /** Matching edges, up to `limit`. */
+  edges: GraphEdge[];
+}
+
+/** Response from `GET /v1/knowledge/path` (KG-2). */
+export interface KgPathResponse {
+  /** Agent whose graph was traversed. */
+  agent_id: string;
+  /** Source memory ID. */
+  from_id: string;
+  /** Target memory ID. */
+  to_id: string;
+  /** Number of edges in the shortest path (0 if source === target). */
+  hop_count: number;
+  /** Ordered list of memory IDs from source to target (inclusive). */
+  path: string[];
+}
+
+/** Response from `GET /v1/knowledge/export` with `format=json` (KG-2). */
+export interface KgExportResponse {
+  /** Agent whose graph was exported. */
+  agent_id: string;
+  /** Export format used (`"json"` when this interface is returned). */
+  format: string;
+  /** Total number of unique memory node IDs in the export. */
+  node_count: number;
+  /** Total number of edges in the export. */
+  edge_count: number;
+  /** All graph edges for the agent. */
+  edges: GraphEdge[];
+}
+
 /** Options for `client.memories.graph()`. */
 export interface MemoryGraphOptions {
   /** Maximum traversal depth (default: 1, max: 3). */
