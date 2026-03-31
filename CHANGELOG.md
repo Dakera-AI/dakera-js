@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **KG-3: Deep Associative Recall bindings:**
+  - `RecalledMemory` interface gains `depth?: number` — the KG hop at which an associated memory was found.
+  - `RecallRequest` interface gains `associated_memories_depth?: number` and `associated_memories_min_weight?: number`.
+  - `DakeraClient.recall()` options object accepts `associated_memories_depth` (1–3, default `1`) and `associated_memories_min_weight` (default `0.0`).
+  - Fully backward-compatible: omitting both new fields retains depth-1 (COG-2) behaviour.
 - **COG-3: Proactive Memory Consolidation bindings:**
   - `MemoryPolicy` interface gains four new optional fields:
     - `consolidation_enabled?: boolean` — opt-in background DBSCAN deduplication (server default: `false`).
