@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CE-7: Time-Window Recall bindings:**
+  - `recall()` options now accept `since?: string` and `until?: string`
+    ISO-8601 timestamp parameters.
+  - `RecallRequest` interface gains `since?` and `until?` fields.
+  - Filters are applied server-side before semantic ranking — only memories
+    created within the specified window are considered.
+  - Invalid ISO-8601 values produce a `400` error from the server.
+
 ## [0.9.8] - 2026-03-31
 
 ### Added

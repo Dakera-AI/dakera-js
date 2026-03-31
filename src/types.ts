@@ -583,6 +583,10 @@ export interface RecallRequest {
   memory_type?: string;
   /** Minimum importance threshold */
   min_importance?: number;
+  /** CE-7: only recall memories created at or after this ISO-8601 timestamp */
+  since?: string;
+  /** CE-7: only recall memories created at or before this ISO-8601 timestamp */
+  until?: string;
 }
 
 /** Request to update importance */
