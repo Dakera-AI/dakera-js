@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.8] - 2026-03-31
 
 ### Added
+- **COG-2: Associative Recall bindings:**
+  - `recall()` options now accept `include_associated?: boolean` and
+    `associated_memories_cap?: number`.
+  - When `include_associated: true`, the server performs a KG depth-1
+    traversal and returns linked memories in `associated_memories`.
+  - Return type changed from `Promise<RecalledMemory[]>` to
+    `Promise<RecallResponse>` — `{ memories: RecalledMemory[],
+    associated_memories?: RecalledMemory[] }`.
+  - New export: `RecallResponse`.
 - **COG-1: Cognitive Memory Lifecycle bindings:**
   - `getMemoryPolicy(namespace)` — retrieve the memory lifecycle policy
     (`GET /v1/namespaces/{namespace}/memory_policy`). Returns `MemoryPolicy`.
