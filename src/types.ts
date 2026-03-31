@@ -2006,4 +2006,27 @@ export interface MemoryPolicy {
   spaced_repetition_factor?: number;
   /** Base interval in seconds for spaced repetition (default: 86 400 = 1 d). */
   spaced_repetition_base_interval_seconds?: number;
+
+  // Proactive consolidation (COG-3) ------------------------------------------
+  /**
+   * Enable background DBSCAN deduplication for this namespace.
+   * When `true` the server merges semantically near-duplicate memories every
+   * `consolidation_interval_hours` hours. Default: `false`.
+   */
+  consolidation_enabled?: boolean;
+  /**
+   * DBSCAN epsilon — cosine-similarity threshold to consider two memories
+   * duplicates (default: `0.92`; higher = only merge very close neighbours).
+   */
+  consolidation_threshold?: number;
+  /**
+   * How often (in hours) the background consolidation job runs for this
+   * namespace (default: `24`).
+   */
+  consolidation_interval_hours?: number;
+  /**
+   * **Read-only.** Lifetime count of memories merged by the consolidation
+   * engine. The server manages this field; any value you send is ignored.
+   */
+  consolidated_count?: number;
 }
