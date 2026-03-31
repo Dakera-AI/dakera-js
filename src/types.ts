@@ -1936,3 +1936,62 @@ export interface ExtractEntitiesResponse {
   /** Wall-clock time taken by the ODE sidecar in milliseconds. */
   processing_time_ms: number;
 }
+
+// =============================================================================
+// COG-1: Cognitive Memory Lifecycle — per-namespace memory policy
+// =============================================================================
+
+/**
+ * Decay strategy name.  The COG-1 variants (power_law, logarithmic, flat) are
+ * only valid inside MemoryPolicy per-type fields; the global DecayConfig
+ * endpoint still accepts only "exponential" | "linear" | "step".
+ */
+export type DecayStrategyName =
+  | 'exponential'
+  | 'linear'
+  | 'step'
+  | 'power_law'
+  | 'logarithmic'
+  | 'flat';
+
+/**
+ * Per-namespace memory lifecycle policy (COG-1).
+ *
+ * Controls type-specific TTLs, decay curves, and spaced repetition behaviour.
+ * All fields are optional and have sensible server-side defaults; only set the
+ * ones you want to override.
+ *
+ * Used by {@link DakeraClient.getMemoryPolicy} and
+ * {@link DakeraClient.setMemoryPolicy}.
+ */
+export interface MemoryPolicy {
+  // Differential TTLs ---------------------------------------------------------
+  /** Default TTL for `working` memories in seconds (default: 14 400 = 4 h). */
+  working_ttl_seconds?: number;
+  /** Default TTL for `episodic` memories in seconds (default: 2 592 000 = 30 d). */
+  episodic_ttl_seconds?: number;
+  /** Default TTL for `semantic` memories in seconds (default: 31 536 000 = 365 d). */
+  semantic_ttl_seconds?: number;
+  /** Default TTL for `procedural` memories in seconds (default: 63 072 000 = 730 d). */
+  procedural_ttl_seconds?: number;
+
+  // Decay curves --------------------------------------------------------------
+  /** Decay strategy for `working` memories (default: `"exponential"`). */
+  working_decay?: DecayStrategyName;
+  /** Decay strategy for `episodic` memories (default: `"power_law"`). */
+  episodic_decay?: DecayStrategyName;
+  /** Decay strategy for `semantic` memories (default: `"logarithmic"`). */
+  semantic_decay?: DecayStrategyName;
+  /** Decay strategy for `procedural` memories (default: `"flat"` — no decay). */
+  procedural_decay?: DecayStrategyName;
+
+  // Spaced repetition ---------------------------------------------------------
+  /**
+   * Multiplier for the TTL extension on each recall hit.
+   * Extension = `access_count × sr_factor × sr_base_interval_seconds`.
+   * Set to 0 to disable. Default: 1.0.
+   */
+  spaced_repetition_factor?: number;
+  /** Base interval in seconds for spaced repetition (default: 86 400 = 1 d). */
+  spaced_repetition_base_interval_seconds?: number;
+}

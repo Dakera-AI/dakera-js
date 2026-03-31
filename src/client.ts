@@ -148,6 +148,8 @@ import type {
   // ODE-2
   ExtractEntitiesRequest,
   ExtractEntitiesResponse,
+  // COG-1
+  MemoryPolicy,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -2576,5 +2578,48 @@ export class DakeraClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  // =========================================================================
+  // COG-1: Per-namespace Memory Lifecycle Policy
+  // =========================================================================
+
+  /**
+   * Return the memory lifecycle policy for a namespace (COG-1).
+   *
+   * `GET /v1/namespaces/{namespace}/memory_policy`
+   *
+   * When no explicit policy has been configured the server returns COG-1
+   * defaults: working=4 h, episodic=30 d, semantic=365 d, procedural=730 d;
+   * exponential / power_law / logarithmic / flat decay; SR factor 1.0.
+   *
+   * @param namespace  Namespace to inspect.
+   */
+  async getMemoryPolicy(namespace: string): Promise<MemoryPolicy> {
+    return this.request<MemoryPolicy>(
+      'GET',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/memory_policy`,
+    );
+  }
+
+  /**
+   * Set the memory lifecycle policy for a namespace (COG-1).
+   *
+   * `PUT /v1/namespaces/{namespace}/memory_policy`
+   *
+   * The policy is persisted in namespace config and applied immediately to
+   * the decay engine background task.  Only populate the fields you want to
+   * override — all fields have safe server-side defaults.
+   *
+   * @param namespace  Namespace to configure.
+   * @param policy     {@link MemoryPolicy} with the desired settings.
+   * @returns          The updated policy as confirmed by the server.
+   */
+  async setMemoryPolicy(namespace: string, policy: MemoryPolicy): Promise<MemoryPolicy> {
+    return this.request<MemoryPolicy>(
+      'PUT',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/memory_policy`,
+      policy,
+    );
   }
 }
