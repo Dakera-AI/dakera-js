@@ -43,6 +43,9 @@ import type {
   CreateKeyRequest,
   DeduplicateRequest,
   DeduplicateResponse,
+  KgExportResponse,
+  KgPathResponse,
+  KgQueryResponse,
   DeleteOptions,
   DeleteResponse,
   DocumentInput,
@@ -1677,6 +1680,74 @@ export class DakeraClient {
   /** Deduplicate memories */
   async deduplicate(request: DeduplicateRequest): Promise<DeduplicateResponse> {
     return this.request<DeduplicateResponse>('POST', '/v1/knowledge/deduplicate', request);
+  }
+
+  // -------------------------------------------------------------------------
+  // KG-2: Graph Query & Export
+  // -------------------------------------------------------------------------
+
+  /**
+   * Query the memory knowledge graph using a filter DSL (KG-2).
+   *
+   * Calls `GET /v1/knowledge/query`.
+   *
+   * @param agentId - Agent whose graph to query.
+   * @param options - Optional filters: `rootId`, `edgeType`, `minWeight`,
+   *   `maxDepth` (default 3), `limit` (default 100, max 1000).
+   */
+  async knowledgeQuery(
+    agentId: string,
+    options?: {
+      rootId?: string;
+      edgeType?: string;
+      minWeight?: number;
+      maxDepth?: number;
+      limit?: number;
+    },
+  ): Promise<KgQueryResponse> {
+    const params = new URLSearchParams({ agent_id: agentId });
+    if (options?.rootId != null) params.set('root_id', options.rootId);
+    if (options?.edgeType != null) params.set('edge_type', options.edgeType);
+    if (options?.minWeight != null) params.set('min_weight', String(options.minWeight));
+    if (options?.maxDepth != null) params.set('max_depth', String(options.maxDepth));
+    if (options?.limit != null) params.set('limit', String(options.limit));
+    return this.request<KgQueryResponse>('GET', `/v1/knowledge/query?${params}`);
+  }
+
+  /**
+   * Find the BFS shortest path between two memory IDs (KG-2).
+   *
+   * Calls `GET /v1/knowledge/path`.
+   *
+   * @param agentId - Agent whose graph to traverse.
+   * @param fromId  - Source memory ID.
+   * @param toId    - Target memory ID.
+   * @throws {@link NotFoundError} if no path exists between the two memories.
+   */
+  async knowledgePath(agentId: string, fromId: string, toId: string): Promise<KgPathResponse> {
+    const params = new URLSearchParams({
+      agent_id: agentId,
+      from: fromId,
+      to: toId,
+    });
+    return this.request<KgPathResponse>('GET', `/v1/knowledge/path?${params}`);
+  }
+
+  /**
+   * Export the memory knowledge graph as JSON or GraphML (KG-2).
+   *
+   * Calls `GET /v1/knowledge/export`.
+   *
+   * @param agentId - Agent whose graph to export.
+   * @param format  - `"json"` (default) or `"graphml"`.
+   *
+   * @returns `KgExportResponse` for `format="json"`. For `format="graphml"`
+   *   the server returns `application/xml` — use the raw fetch API if you
+   *   need the GraphML XML string.
+   */
+  async knowledgeExport(agentId: string, format = 'json'): Promise<KgExportResponse> {
+    const params = new URLSearchParams({ agent_id: agentId, format });
+    return this.request<KgExportResponse>('GET', `/v1/knowledge/export?${params}`);
   }
 
   /**

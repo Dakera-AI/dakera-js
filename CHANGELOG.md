@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-03-31
+
+### Added
+- **KG-2: Graph Query & Export bindings:**
+  - `knowledgeQuery(agentId, options?)` — filter-based DSL query over the memory
+    knowledge graph (`GET /v1/knowledge/query`). Options: `rootId`, `edgeType`,
+    `minWeight`, `maxDepth`, `limit`. Returns `Promise<KgQueryResponse>`.
+  - `knowledgePath(agentId, fromId, toId)` — BFS shortest path between two memory
+    IDs (`GET /v1/knowledge/path`). Returns `Promise<KgPathResponse>`.
+  - `knowledgeExport(agentId, format?)` — export the full graph as JSON or GraphML
+    (`GET /v1/knowledge/export`). Returns `Promise<KgExportResponse>` for
+    `format="json"` (default).
+  - New types: `KgQueryResponse`, `KgPathResponse`, `KgExportResponse`.
+
 ## [0.9.6] - 2026-03-30
 
 ### Added

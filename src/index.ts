@@ -193,6 +193,10 @@ export type {
   GraphPath,
   GraphLinkResponse,
   GraphExport,
+  // KG-2: Graph Query & Export types
+  KgQueryResponse,
+  KgPathResponse,
+  KgExportResponse,
   // Entity Extraction types (CE-4)
   NamespaceNerConfig,
   ExtractedEntity,
