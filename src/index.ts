@@ -78,6 +78,7 @@ export type {
   StoreMemoryRequest,
   Memory,
   RecalledMemory,
+  RecallResponse,
   StoreMemoryResponse,
   UpdateMemoryRequest,
   RecallRequest,

@@ -66,6 +66,7 @@ import type {
   NamespaceInfo,
   QueryOptions,
   RecalledMemory,
+  RecallResponse,
   SearchResult,
   Session,
   SlowQuery,
@@ -1322,11 +1323,28 @@ export class DakeraClient {
     return this.request<StoreMemoryResponse>('POST', `/v1/agents/${agentId}/memories`, request);
   }
 
-  /** Recall memories for an agent */
-  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number }): Promise<RecalledMemory[]> {
-    const body = { query, ...options };
-    const result = await this.request<{ memories: RecalledMemory[] }>('POST', `/v1/agents/${agentId}/memories/recall`, body);
-    return result.memories ?? result as any;
+  /**
+   * Recall memories for an agent.
+   *
+   * @param agentId - Agent identifier
+   * @param query - Semantic query text
+   * @param options - Optional recall parameters
+   * @param options.top_k - Number of primary results (default: 5)
+   * @param options.memory_type - Filter by memory type
+   * @param options.min_importance - Minimum importance threshold
+   * @param options.include_associated - COG-2: traverse KG depth-1 and include
+   *   associatively linked memories in `associated_memories` (default: false)
+   * @param options.associated_memories_cap - COG-2: max associated memories (default: 10, max: 10)
+   * @returns RecallResponse with `memories` and optionally `associated_memories`
+   */
+  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number }): Promise<RecallResponse> {
+    const body: Record<string, unknown> = { query };
+    if (options?.top_k !== undefined) body['top_k'] = options.top_k;
+    if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
+    if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
+    if (options?.include_associated) body['include_associated'] = true;
+    if (options?.associated_memories_cap !== undefined) body['associated_memories_cap'] = options.associated_memories_cap;
+    return this.request<RecallResponse>('POST', `/v1/agents/${agentId}/memories/recall`, body);
   }
 
   /** Get a specific memory */

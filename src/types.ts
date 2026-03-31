@@ -547,6 +547,14 @@ export interface RecalledMemory {
   created_at?: string;
 }
 
+/** COG-2: Response from the recall endpoint with optional associative memories */
+export interface RecallResponse {
+  /** Primary recalled memories */
+  memories: RecalledMemory[];
+  /** COG-2: KG depth-1 associated memories (only present when include_associated was true) */
+  associated_memories?: RecalledMemory[];
+}
+
 /** Response from storing a memory */
 export interface StoreMemoryResponse {
   /** Created memory ID */
