@@ -545,13 +545,15 @@ export interface RecalledMemory {
   metadata?: Record<string, unknown>;
   /** Creation timestamp */
   created_at?: string;
+  /** KG-3: hop depth at which this memory was found (only set on associated memories) */
+  depth?: number;
 }
 
-/** COG-2: Response from the recall endpoint with optional associative memories */
+/** COG-2 / KG-3: Response from the recall endpoint with optional associative memories */
 export interface RecallResponse {
   /** Primary recalled memories */
   memories: RecalledMemory[];
-  /** COG-2: KG depth-1 associated memories (only present when include_associated was true) */
+  /** COG-2 / KG-3: KG associated memories at configurable depth (only present when include_associated was true) */
   associated_memories?: RecalledMemory[];
 }
 
@@ -587,6 +589,10 @@ export interface RecallRequest {
   since?: string;
   /** CE-7: only recall memories created at or before this ISO-8601 timestamp */
   until?: string;
+  /** KG-3: traversal depth 1–3 (default: 1); requires include_associated */
+  associated_memories_depth?: number;
+  /** KG-3: minimum edge weight for KG traversal (default: 0.0) */
+  associated_memories_min_weight?: number;
 }
 
 /** Request to update importance */
