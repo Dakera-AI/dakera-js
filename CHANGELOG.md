@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `consolidation_threshold?: number` — cosine-similarity epsilon (server default: `0.92`).
     - `consolidation_interval_hours?: number` — background job interval in hours (server default: `24`).
     - `consolidated_count?: number` — **read-only** lifetime count of merged memories (server-managed).
+- **SEC-5: Per-namespace rate limiting bindings:**
+  - `MemoryPolicy` interface gains three new optional fields:
+    - `rate_limit_enabled?: boolean` — opt-in per-namespace rate limiting (server default: `false`).
+    - `rate_limit_stores_per_minute?: number` — max store ops/min; `undefined` = unlimited (server default).
+    - `rate_limit_recalls_per_minute?: number` — max recall ops/min; `undefined` = unlimited (server default).
+  - When a limit is exceeded the server returns HTTP 429; the existing `RateLimitError` is thrown with `retryAfter: 60`.
 
 ## [0.9.9] - 2026-03-31
 

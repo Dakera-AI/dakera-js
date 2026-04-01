@@ -2035,4 +2035,12 @@ export interface MemoryPolicy {
    * engine. The server manages this field; any value you send is ignored.
    */
   consolidated_count?: number;
+
+  // Per-namespace rate limiting (SEC-5) --------------------------------------
+  /** Enable per-namespace store/recall rate limiting (default: `false`). */
+  rate_limit_enabled?: boolean;
+  /** Max store operations per minute for this namespace. `undefined` = unlimited (default). */
+  rate_limit_stores_per_minute?: number;
+  /** Max recall operations per minute for this namespace. `undefined` = unlimited (default). */
+  rate_limit_recalls_per_minute?: number;
 }
