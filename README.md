@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
 
-Official TypeScript/JavaScript client for [Dakera](https://dakera.ai) — an AI agent memory platform.
+Official TypeScript/JavaScript SDK for [Dakera](https://dakera.ai) — the AI agent memory platform. Persistent, session-aware, cross-agent memory for your AI agents.
 
 ## Installation
 
