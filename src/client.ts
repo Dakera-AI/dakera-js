@@ -116,6 +116,7 @@ import type {
   DecayConfigUpdateRequest,
   DecayConfigUpdateResponse,
   DecayStatsResponse,
+  KpiSnapshot,
   OpsStats,
   EdgeType,
   GraphExport,
@@ -1981,6 +1982,17 @@ export class DakeraClient {
   /** Get decay activity counters and last-cycle snapshot (DECAY-2). Requires Admin scope. */
   async decayStats(): Promise<DecayStatsResponse> {
     return this.request<DecayStatsResponse>('GET', '/v1/admin/decay/stats');
+  }
+
+  /**
+   * Return a point-in-time product KPI snapshot (OBS-2).
+   *
+   * Calls `GET /v1/kpis`. Returns 8 operational metrics covering latency,
+   * error rate, and retention. Sub-millisecond — served from in-memory
+   * counters. Requires Admin scope.
+   */
+  async getKpis(): Promise<KpiSnapshot> {
+    return this.request<KpiSnapshot>('GET', '/v1/kpis');
   }
 
   /**
