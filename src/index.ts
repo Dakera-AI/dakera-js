@@ -159,6 +159,8 @@ export type {
   DecayConfigUpdateResponse,
   LastDecayCycleStats,
   DecayStatsResponse,
+  // Product KPI Snapshot (OBS-2)
+  KpiSnapshot,
   // API Key types
   ApiKey,
   CreateKeyRequest,

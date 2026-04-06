@@ -2044,3 +2044,34 @@ export interface MemoryPolicy {
   /** Max recall operations per minute for this namespace. `undefined` = unlimited (default). */
   rate_limit_recalls_per_minute?: number;
 }
+
+// ============================================================================
+// Product KPIs (OBS-2)
+// ============================================================================
+
+/**
+ * Point-in-time product KPI snapshot returned by `GET /v1/kpis` (OBS-2).
+ *
+ * All latency values are in milliseconds. Rate/percentage values are in the
+ * range `0.0`–`100.0`. Integer counts are unsigned.
+ *
+ * Requires Admin scope.
+ */
+export interface KpiSnapshot {
+  /** Median recall latency across all namespaces over the last minute (ms). */
+  recall_latency_p50_ms: number;
+  /** 99th-percentile recall latency across all namespaces over the last minute (ms). */
+  recall_latency_p99_ms: number;
+  /** Median store latency across all namespaces over the last minute (ms). */
+  store_latency_p50_ms: number;
+  /** 5xx error rate as a percentage of total API requests over the last minute. */
+  api_error_rate_5xx_pct: number;
+  /** Distinct agent identifiers that stored or recalled a memory in the last 24 hours. */
+  active_agents_count: number;
+  /** Total sessions created in the rolling 7-day window. */
+  session_count_week: number;
+  /** Current number of nodes in the cross-agent knowledge graph. */
+  cross_agent_network_node_count: number;
+  /** Percentage of memories created 7 days ago that are still active. */
+  memory_retention_7d_pct: number;
+}
