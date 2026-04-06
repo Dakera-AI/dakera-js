@@ -660,15 +660,30 @@ export interface StartSessionRequest {
 /** A session */
 export interface Session {
   /** Session ID */
-  session_id: SessionId;
+  id: SessionId;
   /** Agent ID */
   agent_id: AgentId;
-  /** Start timestamp */
-  started_at?: string;
-  /** End timestamp */
-  ended_at?: string;
+  /** Start timestamp (Unix epoch seconds) */
+  started_at?: number;
+  /** End timestamp (Unix epoch seconds) */
+  ended_at?: number;
+  /** Optional session summary */
+  summary?: string;
   /** Session metadata */
   metadata?: Record<string, unknown>;
+  /** Number of memories stored in this session */
+  memory_count?: number;
+}
+
+/** Response from POST /v1/sessions/start */
+export interface SessionStartResponse {
+  session: Session;
+}
+
+/** Response from POST /v1/sessions/{id}/end */
+export interface SessionEndResponse {
+  session: Session;
+  memory_count: number;
 }
 
 /** Options for listing sessions */

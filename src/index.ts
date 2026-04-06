@@ -98,6 +98,8 @@ export type {
   // Session types
   StartSessionRequest,
   Session,
+  SessionStartResponse,
+  SessionEndResponse,
   ListSessionsOptions,
   // Agent types
   AgentSummary,
