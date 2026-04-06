@@ -69,6 +69,8 @@ import type {
   RecallResponse,
   SearchResult,
   Session,
+  SessionStartResponse,
+  SessionEndResponse,
   SlowQuery,
   StorageAnalytics,
   StoreMemoryRequest,
@@ -1626,12 +1628,13 @@ export class DakeraClient {
 
   /** Start a new session */
   async startSession(agentId: string, metadata?: Record<string, unknown>): Promise<Session> {
-    return this.request<Session>('POST', '/v1/sessions/start', { agent_id: agentId, metadata });
+    const resp = await this.request<SessionStartResponse>('POST', '/v1/sessions/start', { agent_id: agentId, metadata });
+    return resp.session;
   }
 
-  /** End a session */
-  async endSession(sessionId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/sessions/${sessionId}/end`);
+  /** End a session. Returns the session state and total memory count at close. */
+  async endSession(sessionId: string): Promise<SessionEndResponse> {
+    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`);
   }
 
   /** Get session details */
