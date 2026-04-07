@@ -734,6 +734,32 @@ export interface AgentStats {
   newest_memory_at?: string;
 }
 
+/** Options for `getWakeUpContext` (DAK-1690) */
+export interface WakeUpOptions {
+  /** Maximum number of memories to return (default 20, max 100) */
+  top_n?: number;
+  /** Only return memories with importance ≥ this value (default 0.0) */
+  min_importance?: number;
+}
+
+/**
+ * Response from `GET /v1/agents/{agent_id}/wake-up` (DAK-1690).
+ *
+ * Returns top-N memories ranked by `importance × exp(-ln2 × age / 14d)` for
+ * fast agent start-up context loading. No embedding inference — served from
+ * the metadata index for sub-millisecond latency.
+ *
+ * Requires Read scope on the agent namespace.
+ */
+export interface WakeUpResponse {
+  /** The agent whose memories are returned */
+  agent_id: AgentId;
+  /** Top-N memories ranked by recency-weighted importance */
+  memories: Memory[];
+  /** Total memories available before top_n cap was applied */
+  total_available: number;
+}
+
 // =============================================================================
 // Knowledge Graph Types
 // =============================================================================

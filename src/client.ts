@@ -89,6 +89,8 @@ import type {
   UpsertResponse,
   Vector,
   VectorInput,
+  WakeUpOptions,
+  WakeUpResponse,
   WarmCacheResponse,
   WarmingPriority,
   WarmingTargetTier,
@@ -1688,6 +1690,26 @@ export class DakeraClient {
     if (options?.limit !== undefined) params.set('limit', String(options.limit));
     const qs = params.toString();
     return this.request<Session[]>('GET', `/v1/agents/${agentId}/sessions${qs ? `?${qs}` : ''}`);
+  }
+
+  /**
+   * Return top-N wake-up context memories for an agent (DAK-1690).
+   *
+   * Calls `GET /v1/agents/{agentId}/wake-up`. Returns memories ranked by
+   * `importance × exp(-ln2 × age / 14d)` — no embedding inference, served
+   * from the metadata index for sub-millisecond latency.
+   *
+   * Requires Read scope on the agent namespace.
+   *
+   * @param agentId - Agent identifier.
+   * @param options - Optional `top_n` (default 20, max 100) and `min_importance` (default 0.0).
+   */
+  async getWakeUpContext(agentId: string, options?: WakeUpOptions): Promise<WakeUpResponse> {
+    const params = new URLSearchParams();
+    if (options?.top_n !== undefined) params.set('top_n', String(options.top_n));
+    if (options?.min_importance !== undefined) params.set('min_importance', String(options.min_importance));
+    const qs = params.toString();
+    return this.request<WakeUpResponse>('GET', `/v1/agents/${agentId}/wake-up${qs ? `?${qs}` : ''}`);
   }
 
   // ===========================================================================
