@@ -104,6 +104,8 @@ export type {
   // Agent types
   AgentSummary,
   AgentStats,
+  WakeUpOptions,
+  WakeUpResponse,
   // Knowledge Graph types
   KnowledgeGraphRequest,
   KnowledgeNode,
