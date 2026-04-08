@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-04-08
+
+### Notes
+- Version bump to match server v0.9.15. No SDK API changes.
+- Server changes (transparent to SDK callers):
+  - **DAK-1691:** Session-end auto-consolidation — `endSession` now triggers server-side DBSCAN clustering of near-duplicate session memories, soft-expiring them with a 30-day TTL. High-importance memories (>0.8) are protected. No request/response signature change.
+  - **DAK-1689:** HNSW post-filter ANN fix — filtered vector queries are now O(N·ANN) instead of O(N·linear). No SDK change.
+
+## [0.9.14] - 2026-04-07
+
+### Added
+- **DAK-1690: Agent wake-up context endpoint:**
+  - `DakeraClient.getWakeUpContext(agentId, options?)` — `GET /v1/agents/{agentId}/wake-up` — returns a `WakeUpResponse` with top-N memories ranked by importance × recency decay. Sub-millisecond; no embedding inference. Requires Read scope.
+  - `WakeUpResponse` and `WakeUpOptions` interfaces exported from `@dakera-ai/dakera`: `agentId`, `memories: Memory[]`, `totalAvailable: number`.
+
+## [0.9.13] - 2026-04-07
+
+### Fixed
+- **Session type fix (DAK-1548):** `Session.id` is now correctly mapped (was `session_id`). `startSession()` and `endSession()` now correctly deserialize wrapped server responses (`{"session": {...}}` / `{"session": ..., "memory_count": ...}`). Added `SessionStartResponse` and `SessionEndResponse` types — `endSession()` now returns `SessionEndResponse` exposing `memoryCount`.
+
 ## [0.9.12] - 2026-04-06
 
 ### Added
