@@ -106,6 +106,10 @@ export type {
   AgentStats,
   WakeUpOptions,
   WakeUpResponse,
+  // CE-10
+  RoutingMode,
+  // CE-12
+  CompressResponse,
   // Knowledge Graph types
   KnowledgeGraphRequest,
   KnowledgeNode,

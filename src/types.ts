@@ -576,6 +576,14 @@ export interface UpdateMemoryRequest {
 }
 
 /** Request to recall memories */
+/**
+ * Retrieval routing mode for recall and search (CE-10).
+ *
+ * Controls which retrieval index the server uses. `"auto"` (default) lets the
+ * server pick the best strategy based on the query.
+ */
+export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
+
 export interface RecallRequest {
   /** Natural language query */
   query: string;
@@ -593,6 +601,8 @@ export interface RecallRequest {
   associated_memories_depth?: number;
   /** KG-3: minimum edge weight for KG traversal (default: 0.0) */
   associated_memories_min_weight?: number;
+  /** CE-10: retrieval routing mode. Default: `"auto"` (server picks best strategy). */
+  routing?: RoutingMode;
 }
 
 /** Request to update importance */
@@ -758,6 +768,25 @@ export interface WakeUpResponse {
   memories: Memory[];
   /** Total memories available before top_n cap was applied */
   total_available: number;
+}
+
+/**
+ * Response from `POST /v1/agents/{id}/compress` (CE-12).
+ *
+ * Contains compression statistics for the agent's memory namespace after the
+ * server runs the compression pass.
+ */
+export interface CompressResponse {
+  /** The agent whose namespace was compressed */
+  agent_id: AgentId;
+  /** Number of memories before compression */
+  memories_before: number;
+  /** Number of memories after compression */
+  memories_after: number;
+  /** Number of memories removed during compression */
+  removed_count: number;
+  /** Wall-clock duration of the compression pass in milliseconds */
+  duration_ms?: number;
 }
 
 // =============================================================================
@@ -2084,6 +2113,23 @@ export interface MemoryPolicy {
   rate_limit_stores_per_minute?: number;
   /** Max recall operations per minute for this namespace. `undefined` = unlimited (default). */
   rate_limit_recalls_per_minute?: number;
+
+  // Store-time deduplication (CE-10) ----------------------------------------
+  /**
+   * Deduplicate against existing memories at store time (CE-10, default: `false`).
+   *
+   * When `true` the server computes a similarity check before persisting a new
+   * memory and drops it if a near-duplicate already exists (threshold controlled
+   * by `dedup_threshold`).
+   */
+  dedup_on_store?: boolean;
+  /**
+   * Cosine-similarity threshold for store-time deduplication (default: `0.92`).
+   *
+   * Memories with similarity ≥ this value are considered duplicates and the
+   * incoming memory is dropped. Only active when `dedup_on_store` is `true`.
+   */
+  dedup_threshold?: number;
 }
 
 // ============================================================================
