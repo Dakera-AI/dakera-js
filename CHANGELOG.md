@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-12
+
+### Added
+- **CE-10:** `RoutingMode` union type (`'auto' | 'vector' | 'bm25' | 'hybrid'`) — controls which retrieval index to use for recall and search.
+- **CE-10:** `routing?: RoutingMode` option on `recall()` and `searchMemories()`. Defaults to `undefined` (server picks `'auto'`).
+- **CE-12:** `compressAgent(agentId)` method — calls `POST /v1/agents/{id}/compress` and returns a `CompressResponse`.
+- **CE-12:** `CompressResponse` interface with `agent_id`, `memories_before`, `memories_after`, `removed_count`, `duration_ms?`.
+- **CE-10:** `MemoryPolicy.dedup_on_store?: boolean` — enable similarity deduplication at store time.
+- **CE-10:** `MemoryPolicy.dedup_threshold?: number` — cosine-similarity threshold for store-time deduplication.
+- **CE-10:** `routing?: RoutingMode` added to `RecallRequest` interface.
+
 ## [0.9.15] - 2026-04-08
 
 ### Notes

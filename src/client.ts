@@ -156,6 +156,8 @@ import type {
   ExtractEntitiesResponse,
   // COG-1
   MemoryPolicy,
+  // CE-12
+  CompressResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -1346,7 +1348,7 @@ export class DakeraClient {
    * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
    * @returns RecallResponse with `memories` and optionally `associated_memories` (each with `depth` field)
    */
-  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode }): Promise<RecallResponse> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
@@ -1357,6 +1359,7 @@ export class DakeraClient {
     if (options?.associated_memories_min_weight !== undefined) body['associated_memories_min_weight'] = options.associated_memories_min_weight;
     if (options?.since !== undefined) body['since'] = options.since;
     if (options?.until !== undefined) body['until'] = options.until;
+    if (options?.routing !== undefined) body['routing'] = options.routing;
     return this.request<RecallResponse>('POST', `/v1/agents/${agentId}/memories/recall`, body);
   }
 
@@ -1414,8 +1417,12 @@ export class DakeraClient {
   }
 
   /** Search memories for an agent */
-  async searchMemories(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number }): Promise<RecalledMemory[]> {
-    const body = { query, ...options };
+  async searchMemories(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode }): Promise<RecalledMemory[]> {
+    const body: Record<string, unknown> = { query };
+    if (options?.top_k !== undefined) body['top_k'] = options.top_k;
+    if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
+    if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
+    if (options?.routing !== undefined) body['routing'] = options.routing;
     const result = await this.request<{ memories: RecalledMemory[] }>('POST', `/v1/agents/${agentId}/memories/search`, body);
     return result.memories ?? result as any;
   }
@@ -1710,6 +1717,19 @@ export class DakeraClient {
     if (options?.min_importance !== undefined) params.set('min_importance', String(options.min_importance));
     const qs = params.toString();
     return this.request<WakeUpResponse>('GET', `/v1/agents/${agentId}/wake-up${qs ? `?${qs}` : ''}`);
+  }
+
+  /**
+   * Compress the memory namespace for an agent (CE-12).
+   *
+   * Runs a server-side compression pass that removes low-value or redundant
+   * memories, returning statistics about the operation.
+   *
+   * @param agentId - Agent whose namespace to compress.
+   * @returns {@link CompressResponse} with before/after counts and timing.
+   */
+  async compressAgent(agentId: string): Promise<CompressResponse> {
+    return this.request<CompressResponse>('POST', `/v1/agents/${agentId}/compress`);
   }
 
   // ===========================================================================
