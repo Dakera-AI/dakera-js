@@ -1348,7 +1348,7 @@ export class DakeraClient {
    * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
    * @returns RecallResponse with `memories` and optionally `associated_memories` (each with `depth` field)
    */
-  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecallResponse> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
@@ -1360,6 +1360,7 @@ export class DakeraClient {
     if (options?.since !== undefined) body['since'] = options.since;
     if (options?.until !== undefined) body['until'] = options.until;
     if (options?.routing !== undefined) body['routing'] = options.routing;
+    if (options?.rerank !== undefined) body['rerank'] = options.rerank;
     return this.request<RecallResponse>('POST', `/v1/agents/${agentId}/memories/recall`, body);
   }
 
@@ -1417,12 +1418,13 @@ export class DakeraClient {
   }
 
   /** Search memories for an agent */
-  async searchMemories(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode }): Promise<RecalledMemory[]> {
+  async searchMemories(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecalledMemory[]> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
     if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
     if (options?.routing !== undefined) body['routing'] = options.routing;
+    if (options?.rerank !== undefined) body['rerank'] = options.rerank;
     const result = await this.request<{ memories: RecalledMemory[] }>('POST', `/v1/agents/${agentId}/memories/search`, body);
     return result.memories ?? result as any;
   }

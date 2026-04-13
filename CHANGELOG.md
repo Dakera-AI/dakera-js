@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-04-13
+
+### Added
+- **CE-13:** `rerank?: boolean` option on `recall()` and `searchMemories()`. Enables cross-encoder reranking via `Xenova/bge-reranker-base`. `undefined` uses server default (`true` for recall, `false` for search). Pass `false` to disable on latency-sensitive paths.
+- **CE-13:** `EmbeddingModel` union extended with `'bge-large'` (1024 dimensions) — new server-default embedding model.
+
 ## [0.10.1] - 2026-04-13
 
 ### Fixed
