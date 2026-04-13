@@ -557,12 +557,16 @@ export interface RecallResponse {
   associated_memories?: RecalledMemory[];
 }
 
-/** Response from storing a memory */
+/** Response from storing a memory.
+ *
+ * The server wraps the created memory in a nested `memory` object:
+ * `{"memory": {"id": "...", "agent_id": "...", ...}, "embedding_time_ms": N}`.
+ */
 export interface StoreMemoryResponse {
-  /** Created memory ID */
-  memory_id: MemoryId;
-  /** Status */
-  status: string;
+  /** The stored memory object */
+  memory: Memory;
+  /** Embedding latency in milliseconds */
+  embedding_time_ms?: number;
 }
 
 /** Request to update a memory */
@@ -627,12 +631,12 @@ export interface ConsolidateRequest {
 
 /** Response from consolidation */
 export interface ConsolidateResponse {
-  /** Number of memories consolidated */
-  consolidated_count: number;
-  /** Number of memories removed */
-  removed_count: number;
-  /** IDs of new consolidated memories */
-  new_memories: MemoryId[];
+  /** Number of source memories removed during consolidation */
+  memories_removed: number;
+  /** IDs of the source memories that were consolidated */
+  source_memory_ids: MemoryId[];
+  /** The resulting consolidated memory (if any) */
+  consolidated_memory?: Memory;
   /** Step-by-step consolidation log (CE-6) */
   log?: ConsolidationLogEntry[];
 }
