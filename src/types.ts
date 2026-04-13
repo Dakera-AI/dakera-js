@@ -335,7 +335,7 @@ export interface ClientOptions {
  * - bge-small: BGE-small - Balanced performance (384 dimensions)
  * - e5-small: E5-small - High quality (384 dimensions)
  */
-export type EmbeddingModel = 'minilm' | 'bge-small' | 'e5-small';
+export type EmbeddingModel = 'bge-large' | 'minilm' | 'bge-small' | 'e5-small';
 
 /**
  * Input for upserting a text document with automatic embedding.
@@ -607,6 +607,8 @@ export interface RecallRequest {
   associated_memories_min_weight?: number;
   /** CE-10: retrieval routing mode. Default: `"auto"` (server picks best strategy). */
   routing?: RoutingMode;
+  /** CE-13: enable cross-encoder reranking. Default: `undefined` (server uses `true` for recall). Pass `false` to disable on latency-sensitive paths. */
+  rerank?: boolean;
 }
 
 /** Request to update importance */
