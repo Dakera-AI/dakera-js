@@ -108,6 +108,8 @@ export type {
   WakeUpResponse,
   // CE-10
   RoutingMode,
+  // CE-14
+  FusionStrategy,
   // CE-12
   CompressResponse,
   // Knowledge Graph types
