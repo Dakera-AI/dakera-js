@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-15
+
+### Added
+- **CE-14:** `FusionStrategy` type (`'rrf' | 'minmax'`) — controls hybrid score fusion in `RecallRequest`.
+- **CE-14:** `fusion?: FusionStrategy` field on `RecallRequest`. `undefined` uses server default (`'rrf'`).
+- **v0.11.0:** `neighborhood?: boolean` field on `RecallRequest`. Session-adjacent memory enrichment (±5 min). `undefined` uses server default (`true`). Pass `false` to disable.
+
+
 ## [0.10.2] - 2026-04-13
 
 ### Added
