@@ -17,8 +17,8 @@ jobs:
 
     strategy:
       matrix:
-        # Full matrix on PRs labeled 'full-matrix'; default: LTS only (saves ~50% CI minutes)
-        node-version: ${{ contains(github.event.pull_request.labels.*.name, 'full-matrix') && fromJson('[20,22]') || fromJson('[22]') }}
+        # Node.js 20 removed — EOL June 2026. Use Node.js 22 (LTS) only.
+        node-version: ["22"]
 
     steps:
       - uses: actions/checkout@v4
@@ -36,3 +36,4 @@ jobs:
 
       - name: Run tests
         run: npm test
+
