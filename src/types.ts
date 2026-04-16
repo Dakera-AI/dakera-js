@@ -592,7 +592,8 @@ export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
  * Fusion strategy for hybrid recall (CE-14).
  *
  * Controls how vector and BM25 scores are combined when `routing = "hybrid"`.
- * `"rrf"` (default) uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
+ * `"minmax"` (server default since v0.11.2) uses min-max score normalization;
+ * `"rrf"` uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
  */
 export type FusionStrategy = 'rrf' | 'minmax';
 
@@ -617,7 +618,7 @@ export interface RecallRequest {
   routing?: RoutingMode;
   /** CE-13: enable cross-encoder reranking. Default: `undefined` (server uses `true` for recall). Pass `false` to disable on latency-sensitive paths. */
   rerank?: boolean;
-  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"rrf"`). */
+  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2). */
   fusion?: FusionStrategy;
   /** v0.11.0: session-adjacent memory enrichment (±5 min). Default: `undefined` (server uses `true`). Pass `false` to disable on latency-sensitive paths. */
   neighborhood?: boolean;
