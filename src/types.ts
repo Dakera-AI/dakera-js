@@ -622,6 +622,8 @@ export interface RecallRequest {
   fusion?: FusionStrategy;
   /** CE-17: explicit vector/BM25 weight for Hybrid routing (0.0–1.0). When set, overrides the adaptive heuristic from QueryClassifier. Omit for adaptive defaults (recommended). Only effective when `routing="hybrid"`. */
   vector_weight?: number;
+  /** CE-23: pseudo-relevance feedback (PRF) passes for BM25 routing (1–3, default: 1). Pass `2` or `3` for multi-hop or temporal queries. Only effective when `routing="bm25"`. */
+  iterations?: number;
   /** v0.11.0: session-adjacent memory enrichment (±5 min). Default: `undefined` (server uses `true`). Pass `false` to disable on latency-sensitive paths. */
   neighborhood?: boolean;
 }
