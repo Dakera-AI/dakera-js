@@ -620,6 +620,8 @@ export interface RecallRequest {
   rerank?: boolean;
   /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2). */
   fusion?: FusionStrategy;
+  /** CE-17: explicit vector/BM25 weight for Hybrid routing (0.0–1.0). When set, overrides the adaptive heuristic from QueryClassifier. Omit for adaptive defaults (recommended). Only effective when `routing="hybrid"`. */
+  vector_weight?: number;
   /** v0.11.0: session-adjacent memory enrichment (±5 min). Default: `undefined` (server uses `true`). Pass `false` to disable on latency-sensitive paths. */
   neighborhood?: boolean;
 }
