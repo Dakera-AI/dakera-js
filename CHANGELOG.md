@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.46] - 2026-04-30
+
+### Added
+- **Filter types**: `FilterOperators` now includes all server-supported operators:
+  - String operators: `$contains`, `$icontains`, `$startsWith`, `$endsWith`, `$glob`, `$regex`
+  - Array operators: `$arrayContains`, `$arrayContainsAll`, `$arrayContainsAny` — match
+    memories whose metadata array field contains a given value or set of values; enables
+    tag-based HNSW pre-filtering (CE-79).
+
+### Notes
+- Version bump to match server v0.11.46. Server improvements v0.11.37–v0.11.46:
+  - **CE-79 — ArrayContains filter operators**: New `$arrayContains`, `$arrayContainsAll`,
+    `$arrayContainsAny` filter conditions for HNSW pre-filtering on array metadata fields.
+  - **CE-73 — Auto-PRF for hybrid inference queries**: Cat3 +4.2pp.
+  - **CE-71 — ML query classifier**: Internal embedding-centroid classifier; temporal
+    inference detection enabled by default (`DAKERA_TEMPORAL_INFERENCE=true`).
+  - **CE-68/69/70 — Temporal boost + recency bias + S3 retry backoff**.
+  - **CE-58 — Configurable RRF k-parameter** (`DAKERA_RRF_K` env var, default 60).
+
 ## [0.11.36] - 2026-04-26
 
 ### Notes
