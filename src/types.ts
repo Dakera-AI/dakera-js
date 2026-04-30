@@ -227,6 +227,24 @@ export interface FilterOperators {
   $in?: unknown[];
   $nin?: unknown[];
   $exists?: boolean;
+  /** Contains substring (case-sensitive) */
+  $contains?: string;
+  /** Contains substring (case-insensitive) */
+  $icontains?: string;
+  /** Starts with prefix */
+  $startsWith?: string;
+  /** Ends with suffix */
+  $endsWith?: string;
+  /** Glob pattern matching (supports * and ? wildcards) */
+  $glob?: string;
+  /** Regular expression matching */
+  $regex?: string;
+  /** Array field contains a value */
+  $arrayContains?: unknown;
+  /** Array field contains all specified values */
+  $arrayContainsAll?: unknown[];
+  /** Array field contains any of the specified values */
+  $arrayContainsAny?: unknown[];
 }
 
 /** Filter expression for queries */
