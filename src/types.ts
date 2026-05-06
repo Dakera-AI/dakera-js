@@ -2203,3 +2203,37 @@ export interface KpiSnapshot {
   /** Percentage of memories created 7 days ago that are still active. */
   memory_retention_7d_pct: number;
 }
+
+// ============================================================================
+// CE-54: Fulltext Reindex (Admin)
+// ============================================================================
+
+/** Per-namespace result from `POST /admin/fulltext/reindex` (CE-54). */
+export interface FulltextReindexNamespaceResult {
+  /** Namespace that was scanned. */
+  namespace: string;
+  /** Total vectors examined. */
+  vectors_scanned: number;
+  /** Memories newly added to the BM25 index. */
+  newly_indexed: number;
+  /** Memories already in the BM25 index (skipped). */
+  already_indexed: number;
+  /** Memories that could not be parsed. */
+  parse_failures: number;
+}
+
+/**
+ * Response from `POST /admin/fulltext/reindex` (CE-54).
+ *
+ * Returned by {@link DakeraClient.adminFulltextReindex}.
+ */
+export interface FulltextReindexResponse {
+  /** Number of namespaces scanned. */
+  namespaces_processed: number;
+  /** Total memories newly added to BM25 across all namespaces. */
+  total_indexed: number;
+  /** Total memories already in the BM25 index (skipped). */
+  total_skipped: number;
+  /** Per-namespace breakdown. */
+  details: FulltextReindexNamespaceResult[];
+}

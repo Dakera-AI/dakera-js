@@ -148,6 +148,8 @@ import type {
   // EXT-1
   ExtractionResult,
   ExtractionProviderInfo,
+  // CE-54
+  FulltextReindexResponse,
   // SEC-3
   RotateEncryptionKeyRequest,
   RotateEncryptionKeyResponse,
@@ -2706,5 +2708,23 @@ export class DakeraClient {
       `/v1/namespaces/${encodeURIComponent(namespace)}/memory_policy`,
       policy,
     );
+  }
+
+  /**
+   * Backfill the BM25 fulltext index for memories stored before CE-12 auto-indexing (CE-54).
+   *
+   * `POST /admin/fulltext/reindex`
+   *
+   * Scans all memories in `namespace` (or every agent namespace when omitted) and adds
+   * any that are missing from the BM25 index. Safe to call multiple times.
+   *
+   * Requires Admin scope.
+   *
+   * @param namespace  Target namespace. Omit to reindex all agent namespaces.
+   * @returns          {@link FulltextReindexResponse} with per-namespace breakdown.
+   */
+  async adminFulltextReindex(namespace?: string): Promise<FulltextReindexResponse> {
+    const body = namespace ? { namespace } : {};
+    return this.request<FulltextReindexResponse>('POST', '/admin/fulltext/reindex', body);
   }
 }

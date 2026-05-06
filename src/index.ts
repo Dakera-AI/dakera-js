@@ -171,6 +171,9 @@ export type {
   DecayStatsResponse,
   // Product KPI Snapshot (OBS-2)
   KpiSnapshot,
+  // CE-54: fulltext reindex
+  FulltextReindexNamespaceResult,
+  FulltextReindexResponse,
   // API Key types
   ApiKey,
   CreateKeyRequest,
