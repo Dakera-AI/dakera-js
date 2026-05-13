@@ -1,5 +1,7 @@
 # ⚡ dakera-js
 
+[![CI](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dakera?logo=npm)](https://www.npmjs.com/package/dakera) [![Downloads](https://img.shields.io/npm/dm/dakera)](https://www.npmjs.com/package/dakera) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-js)](LICENSE)
+
 TypeScript SDK for Dakera AI — store, recall, and search agent memories against a Dakera instance.
 
 Part of [Dakera AI](https://dakera.ai) — the memory engine for AI agents.
