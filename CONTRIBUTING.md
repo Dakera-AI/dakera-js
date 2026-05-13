@@ -46,9 +46,16 @@ npm run lint
 
 ## Reporting Issues
 
-- Use the GitHub issue templates for bug reports and feature requests
-- Include reproduction steps for bugs
-- Provide environment details (OS, runtime version, etc.)
+Use the [Bug Report](https://github.com/Dakera-AI/dakera-js/issues/new?template=bug_report.md) template to report bugs. Please include:
+- Node.js version, operating system
+- Steps to reproduce the issue
+- Expected vs actual behavior
+
+Have a feature idea? Use the [Feature Request](https://github.com/Dakera-AI/dakera-js/issues/new?template=feature_request.md) template.
+
+## Security Vulnerabilities
+
+**Do not open public issues for security vulnerabilities.** See [SECURITY.md](.github/SECURITY.md) for responsible disclosure instructions — email security@dakera.ai.
 
 ## License
 
