@@ -1605,4 +1605,394 @@ describe('DakeraClient', () => {
       ).rejects.toThrow('odeUrl');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Memory Recall (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('recall', () => {
+    it('should recall memories with basic query', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          memories: [
+            { id: 'mem_1', content: 'user prefers code', score: 0.95, memory_type: 'semantic' },
+          ],
+        }),
+      });
+
+      const result = await client.recall('agent-1', 'user preferences');
+
+      expect(result.memories).toHaveLength(1);
+      expect(result.memories[0].content).toBe('user prefers code');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/agents/agent-1/memories/recall');
+      expect(init?.method).toBe('POST');
+    });
+
+    it('should pass all optional recall parameters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ memories: [] }),
+      });
+
+      await client.recall('agent-1', 'test', {
+        top_k: 3,
+        memory_type: 'episodic',
+        min_importance: 0.5,
+        include_associated: true,
+        associated_memories_depth: 2,
+        since: '2026-01-01T00:00:00Z',
+        routing: 'hybrid',
+        rerank: true,
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+      expect(body.top_k).toBe(3);
+      expect(body.memory_type).toBe('episodic');
+      expect(body.min_importance).toBe(0.5);
+      expect(body.include_associated).toBe(true);
+      expect(body.associated_memories_depth).toBe(2);
+      expect(body.since).toBe('2026-01-01T00:00:00Z');
+      expect(body.routing).toBe('hybrid');
+      expect(body.rerank).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Session Management (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('session management', () => {
+    it('should start a session', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          session: {
+            id: 'sess_123',
+            agent_id: 'agent-1',
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        }),
+      });
+
+      const session = await client.startSession('agent-1', { task: 'review' });
+
+      expect(session.id).toBe('sess_123');
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/sessions/start');
+    });
+
+    it('should end a session', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          session: { id: 'sess_123' },
+          memory_count: 5,
+        }),
+      });
+
+      const result = await client.endSession('sess_123');
+
+      expect(result.memory_count).toBe(5);
+    });
+
+    it('should get a session', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          id: 'sess_123',
+          agent_id: 'agent-1',
+          status: 'active',
+        }),
+      });
+
+      const session = await client.getSession('sess_123');
+
+      expect(session.id).toBe('sess_123');
+      expect(session.status).toBe('active');
+    });
+
+    it('should list sessions', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => [
+          { id: 'sess_1', agent_id: 'agent-1' },
+          { id: 'sess_2', agent_id: 'agent-1' },
+        ],
+      });
+
+      const sessions = await client.listSessions({ agent_id: 'agent-1' });
+
+      expect(sessions).toHaveLength(2);
+    });
+
+    it('should get session memories', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => [
+          { id: 'mem_1', content: 'session note' },
+        ],
+      });
+
+      const memories = await client.sessionMemories('sess_123');
+
+      expect(memories).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Memory CRUD (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('memory CRUD', () => {
+    it('should get a specific memory', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          id: 'mem_123',
+          content: 'test memory',
+          memory_type: 'episodic',
+          importance: 0.8,
+        }),
+      });
+
+      const memory = await client.getMemory('agent-1', 'mem_123');
+
+      expect(memory.id).toBe('mem_123');
+      expect(memory.content).toBe('test memory');
+    });
+
+    it('should update a memory', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ memory_id: 'mem_123' }),
+      });
+
+      const result = await client.updateMemory('agent-1', 'mem_123', {
+        content: 'updated content',
+        importance: 0.95,
+      });
+
+      expect(result.memory_id).toBe('mem_123');
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init?.method).toBe('PUT');
+    });
+
+    it('should forget (delete) a memory', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ status: 'deleted' }),
+      });
+
+      const result = await client.forget('agent-1', 'mem_123');
+
+      expect(result.status).toBe('deleted');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/agents/agent-1/memories/mem_123');
+      expect(init?.method).toBe('DELETE');
+    });
+
+    it('should search memories with options', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          memories: [
+            { id: 'mem_1', content: 'pref', score: 0.9 },
+          ],
+        }),
+      });
+
+      const results = await client.searchMemories('agent-1', 'preferences', {
+        memory_type: 'semantic',
+        top_k: 3,
+      });
+
+      expect(results).toHaveLength(1);
+      const body = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+      expect(body.memory_type).toBe('semantic');
+      expect(body.top_k).toBe(3);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Agent Operations (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('agent operations', () => {
+    it('should list agents', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => [
+          { agent_id: 'agent-1', total_memories: 10 },
+          { agent_id: 'agent-2', total_memories: 5 },
+        ],
+      });
+
+      const agents = await client.listAgents();
+
+      expect(agents).toHaveLength(2);
+    });
+
+    it('should get agent stats', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          agent_id: 'agent-1',
+          total_memories: 42,
+          total_sessions: 3,
+          avg_importance: 0.75,
+        }),
+      });
+
+      const stats = await client.agentStats('agent-1');
+
+      expect(stats.agent_id).toBe('agent-1');
+      expect(stats.total_memories).toBe(42);
+      expect(stats.total_sessions).toBe(3);
+    });
+
+    it('should get agent memories', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => [
+          { id: 'mem_1', content: 'test' },
+        ],
+      });
+
+      const memories = await client.agentMemories('agent-1', { limit: 10 });
+
+      expect(memories).toHaveLength(1);
+    });
+
+    it('should get wake-up context', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          agent_id: 'agent-1',
+          memories: [{ id: 'mem_1', content: 'important' }],
+          total_available: 100,
+        }),
+      });
+
+      const ctx = await client.getWakeUpContext('agent-1', { topN: 5, minImportance: 0.8 });
+
+      expect(ctx.agent_id).toBe('agent-1');
+      expect(ctx.memories).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Text Operations (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('text operations', () => {
+    it('should upsert text documents', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ upserted_count: 2 }),
+      });
+
+      const result = await client.upsertText('test-ns', [
+        { id: 'doc1', text: 'Hello world' },
+        { id: 'doc2', text: 'Goodbye world' },
+      ]);
+
+      expect(result.upserted_count).toBe(2);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/namespaces/test-ns/upsert-text');
+    });
+
+    it('should query text', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          results: [
+            { id: 'doc1', text: 'Hello world', score: 0.9 },
+          ],
+        }),
+      });
+
+      const result = await client.queryText('test-ns', 'hello', { top_k: 5 });
+
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].score).toBe(0.9);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Analytics (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('analytics', () => {
+    it('should get analytics overview', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          total_operations: 1000,
+          total_agents: 5,
+        }),
+      });
+
+      const overview = await client.analyticsOverview();
+
+      expect(overview.total_operations).toBe(1000);
+    });
+
+    it('should get latency analytics', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          p50_ms: 12,
+          p99_ms: 45,
+        }),
+      });
+
+      const latency = await client.analyticsLatency();
+
+      expect(latency.p50_ms).toBe(12);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Consolidation (DAK-4924)
+  // ---------------------------------------------------------------------------
+
+  describe('consolidate', () => {
+    it('should consolidate memories for an agent', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          merged_count: 3,
+          clusters: 2,
+        }),
+      });
+
+      const result = await client.consolidate('agent-1');
+
+      expect(result.merged_count).toBe(3);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/agents/agent-1/memories/consolidate');
+    });
+  });
 });
