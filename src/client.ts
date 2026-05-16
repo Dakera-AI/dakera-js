@@ -1428,6 +1428,7 @@ export class DakeraClient {
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
     const result = await this.request<{ memories: RecalledMemory[] }>('POST', `/v1/agents/${agentId}/memories/search`, body);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
     return result.memories ?? result as any;
   }
 
