@@ -1,11 +1,7 @@
-[![Docs](https://img.shields.io/badge/docs-dakera.ai-D4A843)](https://dakera.ai/docs)
 # dakera-js
 
-
-
-[![CI](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dakera?logo=npm)](https://www.npmjs.com/package/dakera) [![Downloads](https://img.shields.io/npm/dm/dakera)](https://www.npmjs.com/package/dakera) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-js)](LICENSE)
+[![CI](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/%40dakera-ai%2Fdakera?logo=npm)](https://www.npmjs.com/package/@dakera-ai/dakera) [![Downloads](https://img.shields.io/npm/dm/%40dakera-ai%2Fdakera)](https://www.npmjs.com/package/@dakera-ai/dakera) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-js)](LICENSE)
 [![dakera.ai](https://img.shields.io/badge/dakera.ai-website-22c55e?style=flat-square)](https://dakera.ai) [![Docs](https://img.shields.io/badge/docs-dakera.ai%2Fdocs-3b82f6?style=flat-square)](https://dakera.ai/docs)
-[![Docs](https://img.shields.io/badge/docs-dakera.ai-D4A843)](https://dakera.ai/docs)
 
 TypeScript/JavaScript SDK for Dakera AI — store, recall, and search agent memories against a Dakera instance.
 
