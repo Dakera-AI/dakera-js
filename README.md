@@ -1,19 +1,39 @@
-# dakera-js
+<p align="center">
+  <img src="https://github.com/dakera-ai.png" alt="Dakera AI" width="80" />
+</p>
 
-[![CI](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/%40dakera-ai%2Fdakera?logo=npm)](https://www.npmjs.com/package/@dakera-ai/dakera) [![Downloads](https://img.shields.io/npm/dm/%40dakera-ai%2Fdakera)](https://www.npmjs.com/package/@dakera-ai/dakera) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-js)](LICENSE)
-[![dakera.ai](https://img.shields.io/badge/dakera.ai-website-22c55e?style=flat-square)](https://dakera.ai) [![Docs](https://img.shields.io/badge/docs-dakera.ai%2Fdocs-3b82f6?style=flat-square)](https://dakera.ai/docs)
+<h1 align="center">dakera-js</h1>
 
-TypeScript/JavaScript SDK for Dakera AI — store, recall, and search agent memories against a Dakera instance.
+<p align="center">
+  TypeScript/JavaScript SDK for <a href="https://dakera.ai">Dakera AI</a> — the memory engine for AI agents
+</p>
 
-Part of [Dakera AI](https://dakera.ai) — the memory engine for AI agents.
+<p align="center">
+  <a href="https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dakera-AI/dakera-js/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://www.npmjs.com/package/@dakera-ai/dakera"><img alt="npm" src="https://img.shields.io/npm/v/%40dakera-ai%2Fdakera?logo=npm" /></a>
+  <a href="https://www.npmjs.com/package/@dakera-ai/dakera"><img alt="Downloads" src="https://img.shields.io/npm/dm/%40dakera-ai%2Fdakera" /></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/Dakera-AI/dakera-js" /></a>
+  <a href="https://dakera.ai/docs"><img alt="Docs" src="https://img.shields.io/badge/docs-dakera.ai%2Fdocs-3b82f6?style=flat-square" /></a>
+  <a href="https://dakera.ai/benchmark"><img alt="LoCoMo 87.6%" src="https://img.shields.io/badge/LoCoMo-87.6%25-22c55e?style=flat-square" /></a>
+</p>
 
-> The Dakera memory engine scores **87.6% on LoCoMo** (1,540 questions, standard eval) — [benchmark details](https://dakera.ai/benchmark)
+---
+
+## Why Dakera?
+
+| | Dakera | Others |
+|---|---|---|
+| **LoCoMo accuracy** | **87.6%** (1,540 Q standard eval) | 60–92% |
+| **Deployment** | Single binary, Docker one-liner | External vector DB + embedding service required |
+| **Embeddings** | Built-in — no OpenAI key needed | Requires external embedding API |
+| **Search modes** | Vector · BM25 · Hybrid · Knowledge Graph | Usually one or two |
+| **Bundle** | ESM + CJS, browser-compatible | Often Node-only |
+
+→ [Full benchmark results](https://dakera.ai/benchmark) · [dakera.ai](https://dakera.ai)
 
 ---
 
 ## Run Dakera
-
-You need a running Dakera server before using this SDK. The fastest way:
 
 ```bash
 docker run -d \
@@ -21,16 +41,16 @@ docker run -d \
   -p 3300:3300 \
   -e DAKERA_ROOT_API_KEY=dk-mykey \
   ghcr.io/dakera-ai/dakera:latest
+
+curl http://localhost:3300/health  # → {"status":"ok"}
 ```
 
-For persistent storage (recommended for anything beyond a quick test):
+For persistent storage with Docker Compose:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker-compose.yml \
   -o docker-compose.yml
 DAKERA_API_KEY=dk-mykey docker compose up -d
-
-curl http://localhost:3300/health  # -> {"status":"ok"}
 ```
 
 Full deployment guide (Docker Compose, Kubernetes, Helm): [dakera-deploy](https://github.com/Dakera-AI/dakera-deploy)
@@ -42,6 +62,10 @@ Full deployment guide (Docker Compose, Kubernetes, Helm): [dakera-deploy](https:
 ```bash
 npm install @dakera-ai/dakera
 ```
+
+Works with **Node.js** (20+), **Deno**, **Bun**, **Cloudflare Workers**, and modern browsers. Ships ESM + CJS with full TypeScript declarations.
+
+---
 
 ## Quick Start
 
@@ -73,12 +97,24 @@ await client.upsert('my-namespace', [
   { id: 'vec1', values: [0.1, 0.2, 0.3], metadata: { category: 'docs' } },
 ]);
 
-// Full-text search
-const results = await client.fulltextSearch('my-namespace', 'completed task', { topK: 5 });
+// Hybrid search (vector + BM25)
+const results = await client.hybridSearch('my-namespace', 'completed task', { topK: 5 });
 for (const r of results) {
   console.log(r.id, r.score);
 }
 ```
+
+### SSE Streaming
+
+```typescript
+// Subscribe to real-time memory events
+const stream = client.subscribeMemoryEvents('my-agent');
+for await (const event of stream) {
+  console.log(event.type, event.memory_id);
+}
+```
+
+---
 
 ## Features
 
@@ -89,27 +125,16 @@ for (const r of results) {
 - **Full-Text Search** — BM25 ranking with stemming and stop-word filtering
 - **Hybrid Search** — combine vector similarity with keyword matching
 - **Text Auto-Embedding** — server-side embedding generation (no local model needed)
+- **Namespaces** — isolated vector stores per project, tenant, or use case
 - **Feedback Loop** — upvote/downvote/flag memories to improve recall quality
 - **Entity Extraction** — GLiNER NER for automatic entity detection
-- **Streaming** — SSE event subscriptions via async generators
+- **SSE Streaming** — async generator event subscriptions, browser-compatible
 - **Branded Types** — `VectorId`, `AgentId`, `MemoryId`, `SessionId` for compile-time safety
-- **CJS + ESM** — dual bundle output, works in Node.js and browsers
+- **ESM + CJS** — dual bundle output, works in Node.js and browsers
 - **Retry & Rate Limiting** — built-in exponential backoff and rate-limit header tracking
 - **Zero Runtime Deps** — uses native `fetch`, no external HTTP libraries
 
-## Examples
-
-See the [`examples/`](examples/) directory:
-
-- [`basic.ts`](examples/basic.ts) — vectors, namespaces, queries, filters, batch operations
-- [`memory.ts`](examples/memory.ts) — store/recall memories, sessions, agent stats
-- [`advanced.ts`](examples/advanced.ts) — text embedding, full-text, hybrid search, knowledge graph, feedback
-
-Run examples with:
-
-```bash
-npx tsx examples/basic.ts
-```
+---
 
 ## Connect to Dakera
 
@@ -136,25 +161,52 @@ const client = new DakeraClient({
 });
 ```
 
-## Documentation
+---
 
--> [Full docs](https://dakera.ai/docs)  
--> [API reference](https://dakera.ai/docs/api)  
--> [TypeScript SDK reference](https://dakera.ai/docs/sdk/typescript)
+## Examples
 
-## Related
+See the [`examples/`](examples/) directory:
 
-| Repo | What it is |
-|---|---|
-| [dakera-py](https://github.com/dakera-ai/dakera-py) | Python SDK |
-| [dakera-go](https://github.com/dakera-ai/dakera-go) | Go SDK |
-| [dakera-rs](https://github.com/dakera-ai/dakera-rs) | Rust client |
-| [dakera-cli](https://github.com/dakera-ai/dakera-cli) | CLI |
-| [dakera-mcp](https://github.com/dakera-ai/dakera-mcp) | MCP server |
-| [dakera-deploy](https://github.com/dakera-ai/dakera-deploy) | Self-host Dakera |
+- [`basic.ts`](examples/basic.ts) — vectors, namespaces, queries, filters, batch operations
+- [`memory.ts`](examples/memory.ts) — store/recall memories, sessions, agent stats
+- [`advanced.ts`](examples/advanced.ts) — text embedding, full-text, hybrid search, knowledge graph, feedback
+
+Run examples with:
+
+```bash
+npx tsx examples/basic.ts
+```
 
 ---
 
-**[dakera.ai](https://dakera.ai)** · [Documentation](https://dakera.ai/docs) · [Request Early Access](https://dakera.ai#cta)
+## Resources
 
-<sub>Part of the Dakera AI open-source ecosystem. Built with Rust. Self-hosted. Zero dependencies.</sub>
+| | |
+|---|---|
+| [Documentation](https://dakera.ai/docs) | Full API reference and guides |
+| [TypeScript SDK docs](https://dakera.ai/docs/sdk/typescript) | TypeScript-specific reference |
+| [Benchmark](https://dakera.ai/benchmark) | LoCoMo evaluation results |
+| [dakera.ai](https://dakera.ai) | Website and early access |
+| [GitHub Org](https://github.com/dakera-ai) | All public repos |
+| [dakera-deploy](https://github.com/Dakera-AI/dakera-deploy) | Self-hosting guide |
+
+### Other SDKs
+
+| SDK | Package |
+|---|---|
+| [dakera-py](https://github.com/dakera-ai/dakera-py) | `dakera` (PyPI) |
+| [dakera-rs](https://github.com/dakera-ai/dakera-rs) | `dakera-client` (crates.io) |
+| [dakera-go](https://github.com/dakera-ai/dakera-go) | `github.com/dakera-ai/dakera-go` |
+| [dakera-cli](https://github.com/dakera-ai/dakera-cli) | CLI tool |
+| [dakera-mcp](https://github.com/dakera-ai/dakera-mcp) | MCP server for Claude/Cursor |
+
+---
+
+<p align="center">
+  <a href="https://dakera.ai">dakera.ai</a> ·
+  <a href="https://dakera.ai/docs">Docs</a> ·
+  <a href="https://dakera.ai/benchmark">Benchmark</a> ·
+  <a href="https://dakera.ai#cta">Request Early Access</a>
+</p>
+
+<p align="center"><sub>Built with Rust. Single binary. Zero external dependencies.</sub></p>
