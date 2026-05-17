@@ -87,12 +87,20 @@ async function main() {
   });
 
   // Delete vectors
-  const deleteResp = await client.delete(namespace, { ids: ['vec1'] });
-  console.log(`\nDeleted ${deleteResp.deleted_count} vectors`);
+  try {
+    const deleteResp = await client.delete(namespace, { ids: ['vec1'] });
+    console.log(`\nDeleted ${deleteResp.deleted_count} vectors`);
+  } catch (e) {
+    console.log(`\nVector delete not supported on this server version: ${e}`);
+  }
 
   // Cleanup
-  await client.deleteNamespace(namespace);
-  console.log('Namespace deleted');
+  try {
+    await client.deleteNamespace(namespace);
+    console.log('Namespace deleted');
+  } catch (e) {
+    console.log(`Namespace delete not supported on this server version: ${e}`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
