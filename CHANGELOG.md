@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.55] - 2026-05-17
+## [0.11.56] - 2026-05-17
 
 ### Changed
 
@@ -24,7 +24,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Docker integration tests in CI** — full end-to-end integration tests run against a live
+- **40+ new client methods** for full engine parity:
+  - **Health probes**: `healthReady()`, `healthLive()`
+  - **Vector bulk ops**: `bulkUpdateVectors()`, `bulkDeleteVectors()`, `countVectors()`
+  - **Agent consolidation**: `consolidateAgent()`, `getConsolidationLog()`, `patchConsolidationConfig()`
+  - **Namespace config**: `getNamespaceEntityConfig()`, `getNamespaceExtractor()`
+  - **Admin cluster**: `adminClusterReplication()`, `adminListShards()`, `adminRebalanceShards()`
+  - **Admin maintenance**: `adminMaintenanceStatus()`, `adminEnableMaintenance()`, `adminDisableMaintenance()`
+  - **Admin quotas**: `adminListQuotas()`, `adminGetDefaultQuota()`, `adminSetDefaultQuota()`, `adminGetQuota()`, `adminSetQuota()`, `adminDeleteQuota()`, `adminCheckQuota()`
+  - **Admin slow queries**: `adminListSlowQueries()`, `adminSlowQuerySummary()`, `adminClearSlowQueries()`, `adminUpdateSlowQueryConfig()`
+  - **Admin backups**: `adminListBackups()`, `adminCreateBackup()`, `adminGetBackup()`, `adminDeleteBackup()`, `adminGetBackupSchedule()`, `adminUpdateBackupSchedule()`, `adminRestoreBackup()`, `adminGetRestoreStatus()`
+  - **Ops**: `opsDiagnostics()`, `opsListJobs()`, `opsGetJob()`, `opsCompact()`, `opsShutdown()`
+  - **Fulltext**: `fulltextStats()`, `fulltextDelete()`
+  - **TTL**: `adminTtlStats()`
+  - **Query routing**: `routeQuery()`
+  - **Import jobs**: `importJobStatus()`
+  - **Backup I/O**: `adminDownloadBackup()`, `adminUploadBackup()`
+  - **Storage tiers**: `adminStorageTierOverview()`
+  - **Background activity**: `adminBackgroundActivity()`
+  - **Memory type stats**: `adminMemoryTypeStats()`
+  - **Namespace migration**: `adminMigrateNamespaceDimensions()`
+- **16 new TypeScript interfaces** for structured responses
+- **173 unit tests** covering all SDK methods
+- **6 new examples**: admin operations, analytics, fulltext search, knowledge graph, ops diagnostics, vector operations
+- **Docker integration tests in CI** — full end-to-end integration tests against a live
   Dakera server container on every PR and push.
 
 ## [0.11.54] - 2026-05-13
