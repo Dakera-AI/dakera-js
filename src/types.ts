@@ -2237,3 +2237,108 @@ export interface FulltextReindexResponse {
   /** Per-namespace breakdown. */
   details: FulltextReindexNamespaceResult[];
 }
+
+// =============================================================================
+// Engine Parity — Health Probes, Vector Bulk Ops, Agent Consolidation
+// =============================================================================
+
+/** Response from GET /health/ready. */
+export interface ReadinessResponse {
+  ready: boolean;
+  version: string;
+  checks: Record<string, { status: string; message?: string }>;
+}
+
+/** Response from GET /health/live. */
+export interface LivenessResponse {
+  alive: boolean;
+  version: string;
+  uptime_seconds: number;
+}
+
+/** Request for POST /v1/namespaces/{ns}/vectors/bulk-update. */
+export interface BulkUpdateRequest {
+  filter: Record<string, unknown>;
+  update: Record<string, unknown>;
+}
+
+/** Response from POST /v1/namespaces/{ns}/vectors/bulk-update. */
+export interface BulkUpdateResponse {
+  updated: number;
+  failed: number;
+  errors: string[];
+}
+
+/** Request for POST /v1/namespaces/{ns}/vectors/bulk-delete. */
+export interface BulkDeleteRequest {
+  filter: Record<string, unknown>;
+}
+
+/** Response from POST /v1/namespaces/{ns}/vectors/bulk-delete. */
+export interface BulkDeleteResponse {
+  deleted: number;
+  failed: number;
+  errors: string[];
+}
+
+/** Request for POST /v1/namespaces/{ns}/vectors/count. */
+export interface CountVectorsRequest {
+  filter?: Record<string, unknown>;
+}
+
+/** Response from POST /v1/namespaces/{ns}/vectors/count. */
+export interface CountVectorsResponse {
+  count: number;
+  namespace: string;
+}
+
+/** Response from POST /v1/agents/{agent_id}/consolidate. */
+export interface AgentConsolidateResponse {
+  agent_id: string;
+  memories_scanned: number;
+  clusters_found: number;
+  memories_deprecated: number;
+  anchor_ids: string[];
+  deprecated_ids: string[];
+  skipped?: boolean;
+  reason?: string;
+}
+
+/** One entry in the agent consolidation log. */
+export interface AgentConsolidationLogEntry {
+  timestamp: number;
+  clusters_found: number;
+  memories_deprecated: number;
+  anchor_ids: string[];
+  deprecated_ids: string[];
+}
+
+/** Request for PATCH /v1/agents/{agent_id}/consolidation/config. */
+export interface ConsolidationConfigPatch {
+  enabled?: boolean;
+  epsilon?: number;
+  min_samples?: number;
+  soft_deprecation_days?: number;
+}
+
+/** Response from PATCH /v1/agents/{agent_id}/consolidation/config. */
+export interface AgentConsolidationConfig {
+  enabled: boolean;
+  epsilon: number;
+  min_samples: number;
+  soft_deprecation_days: number;
+}
+
+/** Response from GET /v1/namespaces/{ns}/config. */
+export interface NamespaceEntityConfig {
+  namespace: string;
+  extract_entities: boolean;
+  entity_types: string[];
+}
+
+/** Response from GET /v1/namespaces/{ns}/extractor. */
+export interface ExtractorConfig {
+  provider: string;
+  model?: string;
+  base_url?: string;
+}
