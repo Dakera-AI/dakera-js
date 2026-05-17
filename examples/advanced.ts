@@ -74,42 +74,52 @@ async function main() {
   console.log('\n--- Knowledge Graph ---');
 
   const agentId = 'agent-demo';
+  let m1Id: string | undefined;
+  let m2Id: string | undefined;
 
-  // Store related memories to build a graph
-  const m1 = await client.storeMemory(agentId, {
-    content: 'User is a senior backend engineer.',
-    memory_type: 'semantic',
-    importance: 0.9,
-  });
+  try {
+    const m1 = await client.storeMemory(agentId, {
+      content: 'User is a senior backend engineer.',
+      memory_type: 'semantic',
+      importance: 0.9,
+    });
+    m1Id = m1.memory_id;
 
-  const m2 = await client.storeMemory(agentId, {
-    content: 'User works primarily with Go and Rust.',
-    memory_type: 'semantic',
-    importance: 0.8,
-  });
+    const m2 = await client.storeMemory(agentId, {
+      content: 'User works primarily with Go and Rust.',
+      memory_type: 'semantic',
+      importance: 0.8,
+    });
+    m2Id = m2.memory_id;
 
-  // Link memories in the knowledge graph
-  await client.memoryLink(m1.memory_id, m2.memory_id, 'related_to');
+    await client.memoryLink(m1Id, m2Id, 'related_to');
 
-  // Traverse the graph
-  const graph = await client.memoryGraph(m1.memory_id, { depth: 2 });
-  console.log(`Graph nodes: ${graph.nodes.length}, edges: ${graph.edges.length}`);
+    const graph = await client.memoryGraph(m1Id, { depth: 2 });
+    console.log(`Graph nodes: ${graph.nodes.length}, edges: ${graph.edges.length}`);
 
-  // Find path between memories
-  const path = await client.memoryPath(m1.memory_id, m2.memory_id);
-  console.log(`Path length: ${path.path.length}`);
+    const path = await client.memoryPath(m1Id, m2Id);
+    console.log(`Path length: ${path.path.length}`);
+  } catch (e: any) {
+    console.log(`Knowledge graph not fully supported on this server version: ${e.message || e}`);
+  }
 
   // -------------------------------------------------------------------------
   // Feedback loop
   // -------------------------------------------------------------------------
   console.log('\n--- Feedback Loop ---');
 
-  await client.feedbackMemory(m1.memory_id, agentId, 'upvote');
-  const history = await client.getMemoryFeedbackHistory(m1.memory_id);
-  console.log(`Feedback entries: ${history.entries.length}`);
+  try {
+    if (m1Id) {
+      await client.feedbackMemory(m1Id, agentId, 'upvote');
+      const history = await client.getMemoryFeedbackHistory(m1Id);
+      console.log(`Feedback entries: ${history.entries.length}`);
+    }
 
-  const summary = await client.getAgentFeedbackSummary(agentId);
-  console.log(`Agent feedback — upvotes: ${summary.upvotes}, downvotes: ${summary.downvotes}`);
+    const summary = await client.getAgentFeedbackSummary(agentId);
+    console.log(`Agent feedback — upvotes: ${summary.upvotes}, downvotes: ${summary.downvotes}`);
+  } catch (e: any) {
+    console.log(`Feedback not fully supported on this server version: ${e.message || e}`);
+  }
 
   // -------------------------------------------------------------------------
   // Analytics
@@ -122,8 +132,10 @@ async function main() {
   // -------------------------------------------------------------------------
   // Cleanup
   // -------------------------------------------------------------------------
-  await client.forget(agentId, m1.memory_id);
-  await client.forget(agentId, m2.memory_id);
+  try {
+    if (m1Id) await client.forget(agentId, m1Id);
+    if (m2Id) await client.forget(agentId, m2Id);
+  } catch (_) { /* best effort cleanup */ }
   await client.deleteNamespace(namespace);
   console.log('\nCleaned up');
 }
