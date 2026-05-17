@@ -143,6 +143,15 @@ jobs:
           DAKERA_API_URL: http://localhost:3300
           DAKERA_API_KEY: test-key
         run: |
-          npx tsx examples/basic.ts
-          npx tsx examples/advanced.ts
-          npx tsx examples/memory.ts
+          run_example() {
+            local out
+            out=$(npx tsx "$1" 2>&1)
+            echo "$out"
+            if echo "$out" | grep -qE '(^|[[:space:]])undefined([[:space:]]|$|:)'; then
+              echo "ERROR: 'undefined' found in output of $1" >&2
+              exit 1
+            fi
+          }
+          run_example examples/basic.ts
+          run_example examples/advanced.ts
+          run_example examples/memory.ts

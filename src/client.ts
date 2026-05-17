@@ -24,6 +24,16 @@ function parseErrorCode(raw: unknown): ErrorCode {
   }
   return ErrorCode.UNKNOWN;
 }
+
+/** Flatten server's nested recall item `{memory: {...}, score}` to flat `RecalledMemory`. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function flattenRecalledMemory(item: any): any {
+  if (item && typeof item === 'object' && item.memory && typeof item.memory === 'object') {
+    return { ...item.memory, score: item.score, depth: item.depth };
+  }
+  return item;
+}
+
 import type {
   AgentStats,
   AgentSummary,
@@ -1368,7 +1378,11 @@ export class DakeraClient {
     if (options?.until !== undefined) body['until'] = options.until;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    return this.request<RecallResponse>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
+    const raw = await this.request<{ memories: Array<unknown>; associated_memories?: Array<unknown> }>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
+    return {
+      memories: (raw.memories ?? []).map(flattenRecalledMemory),
+      ...(raw.associated_memories ? { associated_memories: raw.associated_memories.map(flattenRecalledMemory) } : {}),
+    };
   }
 
   /** Get a specific memory */
@@ -1432,9 +1446,10 @@ export class DakeraClient {
     if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    const result = await this.request<{ memories: RecalledMemory[] }>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
+    const result = await this.request<{ memories: Array<unknown> } | Array<unknown>>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
-    return result.memories ?? result as any;
+    const items: Array<unknown> = (result as any).memories ?? result;
+    return (Array.isArray(items) ? items : []).map(flattenRecalledMemory);
   }
 
   /** Update importance of memories */
@@ -1661,7 +1676,7 @@ export class DakeraClient {
 
   /** End a session. Returns the session state and total memory count at close. */
   async endSession(sessionId: string): Promise<SessionEndResponse> {
-    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`);
+    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`, {});
   }
 
   /** Get session details */
