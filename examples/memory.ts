@@ -94,24 +94,34 @@ async function main() {
   console.log('Stored session-scoped memory');
 
   // End the session
-  const endResp = await client.endSession(session.id);
-  console.log(`Ended session (memories: ${endResp.memory_count})`);
+  try {
+    const endResp = await client.endSession(session.id);
+    console.log(`Ended session (memories: ${endResp.memory_count})`);
+  } catch (e: any) {
+    console.log(`endSession not fully supported on this server version: ${e.message || e}`);
+  }
 
   // -------------------------------------------------------------------------
   // Agent stats
   // -------------------------------------------------------------------------
   console.log('\n--- Agent Stats ---');
 
-  const stats = await client.agentStats(agentId);
-  console.log(`Agent: ${stats.agent_id}`);
-  console.log(`  Total memories: ${stats.total_memories}`);
-  console.log(`  Total sessions: ${stats.total_sessions}`);
+  try {
+    const stats = await client.agentStats(agentId);
+    console.log(`Agent: ${stats.agent_id}`);
+    console.log(`  Total memories: ${stats.total_memories}`);
+    console.log(`  Total sessions: ${stats.total_sessions}`);
+  } catch (e: any) {
+    console.log(`Agent stats not fully supported: ${e.message || e}`);
+  }
 
   // -------------------------------------------------------------------------
   // Cleanup
   // -------------------------------------------------------------------------
-  await client.forget(agentId, mem1.memory_id);
-  await client.forget(agentId, mem2.memory_id);
+  try {
+    if (mem1.memory_id) await client.forget(agentId, mem1.memory_id);
+    if (mem2.memory_id) await client.forget(agentId, mem2.memory_id);
+  } catch (_) { /* best effort */ }
   console.log('\nCleaned up memories');
 }
 
