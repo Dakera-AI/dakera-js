@@ -25,14 +25,14 @@ async function main() {
     importance: 0.9,
     metadata: { source: 'user-feedback' },
   });
-  console.log(`Stored memory: ${mem1.memory_id}`);
+  console.log(`Stored memory: ${mem1.memory.id}`);
 
   const mem2 = await client.storeMemory(agentId, {
     content: 'User is building a TypeScript microservice with Express.',
     memory_type: 'episodic',
     importance: 0.7,
   });
-  console.log(`Stored memory: ${mem2.memory_id}`);
+  console.log(`Stored memory: ${mem2.memory.id}`);
 
   // -------------------------------------------------------------------------
   // Recall memories (semantic search)
@@ -119,8 +119,8 @@ async function main() {
   // Cleanup
   // -------------------------------------------------------------------------
   try {
-    if (mem1.memory_id) await client.forget(agentId, mem1.memory_id);
-    if (mem2.memory_id) await client.forget(agentId, mem2.memory_id);
+    if (mem1.memory?.id) await client.forget(agentId, mem1.memory.id);
+    if (mem2.memory?.id) await client.forget(agentId, mem2.memory.id);
   } catch (_) { /* best effort */ }
   console.log('\nCleaned up memories');
 }

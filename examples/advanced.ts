@@ -83,14 +83,14 @@ async function main() {
       memory_type: 'semantic',
       importance: 0.9,
     });
-    m1Id = m1.memory_id;
+    m1Id = m1.memory.id;
 
     const m2 = await client.storeMemory(agentId, {
       content: 'User works primarily with Go and Rust.',
       memory_type: 'semantic',
       importance: 0.8,
     });
-    m2Id = m2.memory_id;
+    m2Id = m2.memory.id;
 
     await client.memoryLink(m1Id, m2Id, 'related_to');
 
@@ -127,7 +127,7 @@ async function main() {
   console.log('\n--- Analytics ---');
 
   const overview = await client.analyticsOverview();
-  console.log(`Total operations: ${overview.total_operations}`);
+  console.log(`Total queries: ${overview.total_queries}`);
 
   // -------------------------------------------------------------------------
   // Cleanup

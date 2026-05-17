@@ -14,7 +14,7 @@ async function main() {
 
   // Check server health
   const health = await client.health();
-  console.log(`Server: ${health.version} (healthy: ${health.healthy})`);
+  console.log(`Server: ${health.version} (status: ${health.status})`);
 
   const namespace = 'example-vectors';
 
