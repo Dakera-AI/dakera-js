@@ -75,10 +75,6 @@ async function main() {
     }
   });
 
-  // Delete vectors
-  const deleteResp = await client.delete(namespace, { ids: ['vec1'] });
-  console.log(`\nDeleted ${deleteResp.deleted_count} vectors`);
-
   // Cleanup
   await client.deleteNamespace(namespace);
   console.log('Namespace deleted');
