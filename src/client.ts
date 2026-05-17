@@ -505,7 +505,7 @@ export class DakeraClient {
     if (options.filter) body.filter = options.filter;
     if (options.deleteAll) body.delete_all = true;
 
-    return this.request<DeleteResponse>('POST', `/v1/namespaces/${namespace}/delete`, body);
+    return this.request<DeleteResponse>('POST', `/v1/namespaces/${namespace}/vectors/delete`, body);
   }
 
   /**
