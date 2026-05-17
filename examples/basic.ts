@@ -62,11 +62,15 @@ async function main() {
     console.log(`ID: ${match.id}, Score: ${match.score.toFixed(4)}, Category: ${match.metadata?.category}`);
   }
 
-  // Fetch vectors by ID
+  // Fetch vectors by ID (may not be supported on all server versions)
   console.log('\n--- Fetched Vectors ---');
-  const vectors = await client.fetch(namespace, ['vec1', 'vec2']);
-  for (const vec of vectors) {
-    console.log(`ID: ${vec.id}, Values: [${vec.values?.join(', ')}]`);
+  try {
+    const vectors = await client.fetch(namespace, ['vec1', 'vec2']);
+    for (const vec of vectors) {
+      console.log(`ID: ${vec.id}, Values: [${vec.values?.join(', ')}]`);
+    }
+  } catch (e) {
+    console.log(`Fetch not supported on this server version: ${e}`);
   }
 
   // Batch query
