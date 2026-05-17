@@ -1372,8 +1372,8 @@ export class DakeraClient {
   }
 
   /** Get a specific memory */
-  async getMemory(_agentId: string, memoryId: string): Promise<Memory> {
-    return this.request<Memory>('GET', `/v1/memory/get/${memoryId}`);
+  async getMemory(agentId: string, memoryId: string): Promise<Memory> {
+    return this.request<Memory>('GET', `/v1/memory/get/${memoryId}?agent_id=${encodeURIComponent(agentId)}`);
   }
 
   /** Update an existing memory */
