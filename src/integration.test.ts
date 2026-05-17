@@ -29,7 +29,7 @@ let client: DakeraClient;
 beforeAll(async () => {
   if (skip) return;
   client = new DakeraClient({ baseUrl: DAKERA_URL, apiKey: "test-key" });
-  await client.createNamespace(TEST_NAMESPACE, { dimensions: 384 });
+  await client.createNamespace(TEST_NAMESPACE, { dimensions: 1024 });
 });
 
 afterAll(async () => {
@@ -51,7 +51,7 @@ describeIntegration("Health", () => {
 describeIntegration("Namespaces", () => {
   it("creates a namespace", async () => {
     const ns = `integ-create-${crypto.randomUUID().slice(0, 8)}`;
-    const result = await client.createNamespace(ns, { dimensions: 384 });
+    const result = await client.createNamespace(ns, { dimensions: 1024 });
     expect(result.namespace).toBe(ns);
     await client.deleteNamespace(ns);
   });
@@ -65,12 +65,12 @@ describeIntegration("Namespaces", () => {
   it("gets a namespace", async () => {
     const ns = await client.getNamespace(TEST_NAMESPACE);
     expect(ns.namespace).toBe(TEST_NAMESPACE);
-    expect(ns.dimension).toBe(384);
+    expect(ns.dimension).toBe(1024);
   });
 
   it("configures a namespace", async () => {
     const result = await client.configureNamespace(TEST_NAMESPACE, {
-      dimension: 384,
+      dimension: 1024,
     });
     expect(result).toBeDefined();
     expect(result.namespace).toBe(TEST_NAMESPACE);
@@ -78,7 +78,7 @@ describeIntegration("Namespaces", () => {
 
   it("deletes a namespace", async () => {
     const ns = `integ-del-${crypto.randomUUID().slice(0, 8)}`;
-    await client.createNamespace(ns, { dimensions: 384 });
+    await client.createNamespace(ns, { dimensions: 1024 });
     await client.deleteNamespace(ns);
     const namespaces = await client.listNamespaces();
     const names = namespaces.map((n) => n.namespace);
