@@ -178,14 +178,14 @@ export interface IndexStats {
 /** Document for full-text search */
 export interface Document {
   id: VectorId;
-  content: string;
+  text: string;
   metadata?: Record<string, unknown>;
 }
 
 /** Input for document operations */
 export type DocumentInput = Document | {
   id: VectorId | string;
-  content: string;
+  text: string;
   metadata?: Record<string, unknown>;
 };
 

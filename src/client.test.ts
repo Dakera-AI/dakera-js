@@ -194,8 +194,8 @@ describe('DakeraClient', () => {
       });
 
       const result = await client.indexDocuments('test-ns', [
-        { id: 'doc1', content: 'Hello world' },
-        { id: 'doc2', content: 'Goodbye world' },
+        { id: 'doc1', text: 'Hello world' },
+        { id: 'doc2', text: 'Goodbye world' },
       ]);
 
       expect(result.indexedCount).toBe(2);
