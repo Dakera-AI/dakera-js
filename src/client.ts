@@ -209,6 +209,17 @@ import type {
   JobInfo,
   CompactionRequest,
   CompactionResponse,
+  // Engine parity — Phase 3
+  FullTextIndexStats,
+  FulltextDeleteResponse,
+  TtlStatsResponse,
+  RouteRequest,
+  RouteResponse,
+  ImportJobStatus,
+  StorageTierOverview,
+  MemoryTypeStatsResponse,
+  MigrateNamespaceDimensionsRequest,
+  MigrateDimensionsResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -3048,5 +3059,101 @@ export class DakeraClient {
   /** POST /ops/shutdown — request graceful shutdown. */
   async opsShutdown(): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>('POST', '/ops/shutdown');
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Phase 3 — Engine Parity
+  // ────────────────────────────────────────────────────────────
+
+  /** GET /v1/namespaces/{namespace}/fulltext/stats — full-text index statistics. */
+  async fulltextStats(namespace: string): Promise<FullTextIndexStats> {
+    return this.request<FullTextIndexStats>(
+      'GET',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/stats`,
+    );
+  }
+
+  /** POST /v1/namespaces/{namespace}/fulltext/delete — delete documents from full-text index. */
+  async fulltextDelete(namespace: string, ids: string[]): Promise<FulltextDeleteResponse> {
+    return this.request<FulltextDeleteResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/delete`,
+      { ids },
+    );
+  }
+
+  /** GET /admin/ttl/stats — TTL statistics across all namespaces. */
+  async adminTtlStats(): Promise<TtlStatsResponse> {
+    return this.request<TtlStatsResponse>('GET', '/admin/ttl/stats');
+  }
+
+  /** POST /v1/route — route a query to the best-matching namespace(s). */
+  async routeQuery(request: RouteRequest): Promise<RouteResponse> {
+    return this.request<RouteResponse>('POST', '/v1/route', request);
+  }
+
+  /** GET /v1/import/{job_id}/status — check import job progress. */
+  async importJobStatus(jobId: string): Promise<ImportJobStatus> {
+    return this.request<ImportJobStatus>(
+      'GET',
+      `/v1/import/${encodeURIComponent(jobId)}/status`,
+    );
+  }
+
+  /** GET /admin/backups/{id}/download — download a backup as binary data. */
+  async adminDownloadBackup(backupId: string): Promise<ArrayBuffer> {
+    const url = `${this.baseUrl}/admin/backups/${encodeURIComponent(backupId)}/download`;
+    const response = await fetch(url, {
+      headers: { ...this.headers, Accept: 'application/octet-stream' },
+    });
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status}`);
+    }
+    return response.arrayBuffer();
+  }
+
+  /** POST /admin/backups/upload — upload a backup archive. */
+  async adminUploadBackup(data: ArrayBuffer | Uint8Array): Promise<CreateBackupResponse> {
+    const url = `${this.baseUrl}/admin/backups/upload`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    headers['Content-Type'] = 'application/gzip';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: data instanceof ArrayBuffer ? data : (data as unknown as BodyInit),
+    });
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+    return response.json() as Promise<CreateBackupResponse>;
+  }
+
+  /** GET /admin/storage/tiers — storage tier overview. */
+  async adminStorageTierOverview(): Promise<StorageTierOverview> {
+    return this.request<StorageTierOverview>('GET', '/admin/storage/tiers');
+  }
+
+  /** GET /admin/background-activity — current background activity. */
+  async adminBackgroundActivity(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/admin/background-activity');
+  }
+
+  /** GET /admin/memory-type-stats — memory type distribution statistics. */
+  async adminMemoryTypeStats(): Promise<MemoryTypeStatsResponse> {
+    return this.request<MemoryTypeStatsResponse>('GET', '/admin/memory-type-stats');
+  }
+
+  /** POST /admin/namespaces/migrate-dimensions — migrate namespace embedding dimensions. */
+  async adminMigrateNamespaceDimensions(
+    request?: MigrateNamespaceDimensionsRequest,
+  ): Promise<MigrateDimensionsResponse> {
+    return this.request<MigrateDimensionsResponse>(
+      'POST',
+      '/admin/namespaces/migrate-dimensions',
+      request ?? {},
+    );
   }
 }

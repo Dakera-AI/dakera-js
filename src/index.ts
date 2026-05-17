@@ -305,6 +305,24 @@ export type {
   SystemDiagnostics,
   CompactionRequest,
   CompactionResponse,
+  // Engine parity — Phase 3
+  FullTextIndexStats,
+  FulltextDeleteRequest,
+  FulltextDeleteResponse,
+  TtlNamespaceStats,
+  TtlStatsResponse,
+  RouteMatch,
+  RouteResponse,
+  RouteRequest,
+  ImportJobStatus,
+  TierInfo,
+  TierConfig,
+  TierActivity,
+  StorageTierOverview,
+  MemoryTypeStatsResponse,
+  MigrateNamespaceDimensionsRequest,
+  NamespaceMigrationResult,
+  MigrateDimensionsResponse,
 } from './types';
 
 // Errors

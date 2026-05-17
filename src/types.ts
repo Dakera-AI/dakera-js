@@ -2633,3 +2633,156 @@ export interface CompactionResponse {
   job_id: string;
   message: string;
 }
+
+// ────────────────────────────────────────────────────────────
+// Phase 3 — Engine Parity
+// ────────────────────────────────────────────────────────────
+
+/** GET /v1/namespaces/{namespace}/fulltext/stats */
+export interface FullTextIndexStats {
+  /** Number of documents in the full-text index. */
+  document_count: number;
+  /** Number of unique terms across all documents. */
+  unique_terms: number;
+  /** Average document length (in terms). */
+  avg_doc_length: number;
+}
+
+/** Request body for POST /v1/namespaces/{namespace}/fulltext/delete */
+export interface FulltextDeleteRequest {
+  /** IDs of documents to delete from the full-text index. */
+  ids: string[];
+}
+
+/** Response from POST /v1/namespaces/{namespace}/fulltext/delete */
+export interface FulltextDeleteResponse {
+  /** Number of documents deleted. */
+  deleted_count: number;
+}
+
+/** Per-namespace TTL statistics. */
+export interface TtlNamespaceStats {
+  namespace: string;
+  vectors_with_ttl: number;
+  expiring_within_hour: number;
+  expiring_within_day: number;
+  expired_pending_cleanup: number;
+}
+
+/** Response from GET /admin/ttl/stats */
+export interface TtlStatsResponse {
+  namespaces: TtlNamespaceStats[];
+  total_with_ttl: number;
+  total_expired: number;
+}
+
+/** A single route match from the query router. */
+export interface RouteMatch {
+  namespace: string;
+  similarity: number;
+  description?: string;
+}
+
+/** Response from POST /v1/route */
+export interface RouteResponse {
+  routes: RouteMatch[];
+  model: string;
+  embedding_time_ms: number;
+}
+
+/** Request body for POST /v1/route */
+export interface RouteRequest {
+  query: string;
+  top_k?: number;
+  min_similarity?: number;
+  model?: string;
+}
+
+/** Response from GET /v1/import/{job_id}/status */
+export interface ImportJobStatus {
+  job_id: string;
+  status: string;
+  format: string;
+  total: number;
+  imported: number;
+  skipped: number;
+  errors: string[];
+  started_at: number;
+  finished_at?: number;
+}
+
+/** Information about a storage tier. */
+export interface TierInfo {
+  name: string;
+  tier_type: string;
+  technology: string;
+  description: string;
+  target_latency: string;
+  capacity?: string;
+  status: string;
+  current_count: number;
+  hit_count: number;
+  hit_rate: number;
+}
+
+/** Storage tier configuration. */
+export interface TierConfig {
+  hot_tier_capacity: number;
+  hot_to_warm_threshold_secs: number;
+  warm_to_cold_threshold_secs: number;
+  auto_tier_enabled: boolean;
+  tier_check_interval_secs: number;
+}
+
+/** Storage tier activity metrics. */
+export interface TierActivity {
+  promotions: number;
+  demotions: number;
+  cache_hit_rate: number;
+  storage_backend: string;
+  promotions_to_hot: number;
+  demotions_to_warm: number;
+  demotions_to_cold: number;
+}
+
+/** Response from GET /admin/storage/tiers */
+export interface StorageTierOverview {
+  tiers_enabled: boolean;
+  architecture: TierInfo[];
+  config: TierConfig;
+  activity: TierActivity;
+}
+
+/** Response from GET /admin/memory-type-stats */
+export interface MemoryTypeStatsResponse {
+  total: number;
+  working: number;
+  episodic: number;
+  semantic: number;
+  procedural: number;
+  agent_namespaces: number;
+}
+
+/** Request body for POST /admin/namespaces/migrate-dimensions */
+export interface MigrateNamespaceDimensionsRequest {
+  namespaces?: string[];
+  target_dimension?: number;
+}
+
+/** Result of migrating a single namespace's dimensions. */
+export interface NamespaceMigrationResult {
+  namespace: string;
+  original_dimension: number;
+  vectors_migrated: number;
+  vectors_skipped: number;
+  status: string;
+  error?: string;
+}
+
+/** Response from POST /admin/namespaces/migrate-dimensions */
+export interface MigrateDimensionsResponse {
+  migrated: number;
+  failed: number;
+  already_current: number;
+  results: NamespaceMigrationResult[];
+}
