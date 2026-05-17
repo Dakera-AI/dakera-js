@@ -255,6 +255,21 @@ export type {
   // COG-1: Cognitive Memory Lifecycle
   DecayStrategyName,
   MemoryPolicy,
+  // Engine parity — health probes, vector bulk ops, agent consolidation, namespace config
+  ReadinessResponse,
+  LivenessResponse,
+  BulkUpdateRequest,
+  BulkUpdateResponse,
+  BulkDeleteRequest,
+  BulkDeleteResponse,
+  CountVectorsRequest,
+  CountVectorsResponse,
+  AgentConsolidateResponse,
+  AgentConsolidationLogEntry,
+  ConsolidationConfigPatch,
+  AgentConsolidationConfig,
+  NamespaceEntityConfig,
+  ExtractorConfig,
 } from './types';
 
 // Errors

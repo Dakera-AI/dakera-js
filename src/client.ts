@@ -170,6 +170,18 @@ import type {
   MemoryPolicy,
   // CE-12
   CompressResponse,
+  // Engine parity
+  ReadinessResponse,
+  LivenessResponse,
+  BulkUpdateResponse,
+  BulkDeleteResponse,
+  CountVectorsResponse,
+  AgentConsolidateResponse,
+  AgentConsolidationLogEntry,
+  ConsolidationConfigPatch,
+  AgentConsolidationConfig,
+  NamespaceEntityConfig,
+  ExtractorConfig,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -508,6 +520,45 @@ export class DakeraClient {
     return this.request<DeleteResponse>('POST', `/v1/namespaces/${namespace}/vectors/delete`, body);
   }
 
+  /** Bulk update vector metadata matching a filter. */
+  async bulkUpdateVectors(
+    namespace: string,
+    filter: Record<string, unknown>,
+    update: Record<string, unknown>
+  ): Promise<BulkUpdateResponse> {
+    return this.request<BulkUpdateResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/vectors/bulk-update`,
+      { filter, update }
+    );
+  }
+
+  /** Bulk delete vectors matching a filter. */
+  async bulkDeleteVectors(
+    namespace: string,
+    filter: Record<string, unknown>
+  ): Promise<BulkDeleteResponse> {
+    return this.request<BulkDeleteResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/vectors/bulk-delete`,
+      { filter }
+    );
+  }
+
+  /** Count vectors in a namespace, optionally filtered. */
+  async countVectors(
+    namespace: string,
+    filter?: Record<string, unknown>
+  ): Promise<CountVectorsResponse> {
+    const body: Record<string, unknown> = {};
+    if (filter) body.filter = filter;
+    return this.request<CountVectorsResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/vectors/count`,
+      body
+    );
+  }
+
   /**
    * Fetch vectors by ID.
    *
@@ -771,6 +822,16 @@ export class DakeraClient {
    */
   async health(): Promise<HealthResponse> {
     return this.request<HealthResponse>('GET', '/health');
+  }
+
+  /** K8s readiness probe — checks storage and dependencies. */
+  async healthReady(): Promise<ReadinessResponse> {
+    return this.request<ReadinessResponse>('GET', '/health/ready');
+  }
+
+  /** K8s liveness probe — checks process is alive. */
+  async healthLive(): Promise<LivenessResponse> {
+    return this.request<LivenessResponse>('GET', '/health/live');
   }
 
   /**
@@ -1470,6 +1531,28 @@ export class DakeraClient {
     return this.request<ConsolidateResponse>('POST', '/v1/memory/consolidate', { ...(request ?? {}), agent_id: agentId });
   }
 
+  /** Consolidate memories directly for an agent (DBSCAN clustering). */
+  async consolidateAgent(agentId: string): Promise<AgentConsolidateResponse> {
+    return this.request<AgentConsolidateResponse>('POST', `/v1/agents/${encodeURIComponent(agentId)}/consolidate`);
+  }
+
+  /** Get the consolidation execution log for an agent. */
+  async getConsolidationLog(agentId: string): Promise<AgentConsolidationLogEntry[]> {
+    return this.request<AgentConsolidationLogEntry[]>('GET', `/v1/agents/${encodeURIComponent(agentId)}/consolidation/log`);
+  }
+
+  /** Update the consolidation configuration for an agent. */
+  async patchConsolidationConfig(
+    agentId: string,
+    config: ConsolidationConfigPatch
+  ): Promise<AgentConsolidationConfig> {
+    return this.request<AgentConsolidationConfig>(
+      'PATCH',
+      `/v1/agents/${encodeURIComponent(agentId)}/consolidation/config`,
+      config as Record<string, unknown>
+    );
+  }
+
   /** Submit feedback on a memory recall */
   async memoryFeedback(agentId: string, request: MemoryFeedbackRequest): Promise<MemoryFeedbackResponse> {
     return this.request<MemoryFeedbackResponse>('POST', '/v1/memory/feedback', { ...request, agent_id: agentId });
@@ -1611,6 +1694,16 @@ export class DakeraClient {
   // =========================================================================
   // Entity Extraction Operations (CE-4)
   // =========================================================================
+
+  /** Get entity extraction configuration for a namespace. */
+  async getNamespaceEntityConfig(namespace: string): Promise<NamespaceEntityConfig> {
+    return this.request<NamespaceEntityConfig>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/config`);
+  }
+
+  /** Get the extractor provider configuration for a namespace. */
+  async getNamespaceExtractor(namespace: string): Promise<ExtractorConfig> {
+    return this.request<ExtractorConfig>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/extractor`);
+  }
 
   /**
    * Configure entity extraction for a namespace.
