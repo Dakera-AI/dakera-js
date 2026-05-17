@@ -44,7 +44,7 @@ afterAll(async () => {
 describeIntegration("Health", () => {
   it("returns ok status", async () => {
     const result = await client.health();
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("healthy");
   });
 });
 
