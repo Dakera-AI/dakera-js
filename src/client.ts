@@ -170,7 +170,7 @@ import type {
   MemoryPolicy,
   // CE-12
   CompressResponse,
-  // Engine parity
+  // Engine parity — Phase 1
   ReadinessResponse,
   LivenessResponse,
   BulkUpdateResponse,
@@ -182,6 +182,44 @@ import type {
   AgentConsolidationConfig,
   NamespaceEntityConfig,
   ExtractorConfig,
+  // Engine parity — Phase 2
+  ReplicationStatus,
+  ShardListResponse,
+  ShardRebalanceRequest,
+  ShardRebalanceResponse,
+  MaintenanceStatus,
+  EnableMaintenanceRequest,
+  DisableMaintenanceRequest,
+  QuotaListResponse,
+  DefaultQuotaResponse,
+  SetDefaultQuotaRequest,
+  QuotaStatus,
+  SetQuotaRequest,
+  SetQuotaResponse,
+  QuotaCheckRequest,
+  QuotaCheckResult,
+  BackupListResponse,
+  CreateBackupRequest,
+  CreateBackupResponse,
+  BackupSchedule,
+  UpdateBackupScheduleRequest,
+  RestoreBackupRequest,
+  RestoreBackupResponse,
+  SystemDiagnostics,
+  JobInfo,
+  CompactionRequest,
+  CompactionResponse,
+  // Engine parity — Phase 3
+  FullTextIndexStats,
+  FulltextDeleteResponse,
+  TtlStatsResponse,
+  RouteRequest,
+  RouteResponse,
+  ImportJobStatus,
+  StorageTierOverview,
+  MemoryTypeStatsResponse,
+  MigrateNamespaceDimensionsRequest,
+  MigrateDimensionsResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -2848,5 +2886,274 @@ export class DakeraClient {
   async adminFulltextReindex(namespace?: string): Promise<FulltextReindexResponse> {
     const body = namespace ? { namespace } : {};
     return this.request<FulltextReindexResponse>('POST', '/admin/fulltext/reindex', body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin — Cluster & Maintenance
+  // ---------------------------------------------------------------------------
+
+  /** GET /admin/cluster/replication — cluster replication status. */
+  async adminClusterReplication(): Promise<ReplicationStatus> {
+    return this.request<ReplicationStatus>('GET', '/admin/cluster/replication');
+  }
+
+  /** GET /admin/cluster/shards — list shards. */
+  async adminListShards(): Promise<ShardListResponse> {
+    return this.request<ShardListResponse>('GET', '/admin/cluster/shards');
+  }
+
+  /** POST /admin/cluster/shards/rebalance — rebalance shards. */
+  async adminRebalanceShards(request?: ShardRebalanceRequest): Promise<ShardRebalanceResponse> {
+    return this.request<ShardRebalanceResponse>('POST', '/admin/cluster/shards/rebalance', request ?? {});
+  }
+
+  /** GET /admin/cluster/maintenance — maintenance mode status. */
+  async adminMaintenanceStatus(): Promise<MaintenanceStatus> {
+    return this.request<MaintenanceStatus>('GET', '/admin/cluster/maintenance');
+  }
+
+  /** POST /admin/cluster/maintenance/enable — enable maintenance mode. */
+  async adminEnableMaintenance(request: EnableMaintenanceRequest): Promise<MaintenanceStatus> {
+    return this.request<MaintenanceStatus>('POST', '/admin/cluster/maintenance/enable', request);
+  }
+
+  /** POST /admin/cluster/maintenance/disable — disable maintenance mode. */
+  async adminDisableMaintenance(request?: DisableMaintenanceRequest): Promise<MaintenanceStatus> {
+    return this.request<MaintenanceStatus>('POST', '/admin/cluster/maintenance/disable', request ?? {});
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin — Quotas
+  // ---------------------------------------------------------------------------
+
+  /** GET /admin/quotas — list all namespace quotas. */
+  async adminListQuotas(): Promise<QuotaListResponse> {
+    return this.request<QuotaListResponse>('GET', '/admin/quotas');
+  }
+
+  /** GET /admin/quotas/default — get default quota configuration. */
+  async adminGetDefaultQuota(): Promise<DefaultQuotaResponse> {
+    return this.request<DefaultQuotaResponse>('GET', '/admin/quotas/default');
+  }
+
+  /** PUT /admin/quotas/default — set default quota configuration. */
+  async adminSetDefaultQuota(request: SetDefaultQuotaRequest): Promise<SetQuotaResponse> {
+    return this.request<SetQuotaResponse>('PUT', '/admin/quotas/default', request);
+  }
+
+  /** GET /admin/quotas/{namespace} — get namespace quota. */
+  async adminGetQuota(namespace: string): Promise<QuotaStatus> {
+    return this.request<QuotaStatus>('GET', `/admin/quotas/${namespace}`);
+  }
+
+  /** PUT /admin/quotas/{namespace} — set namespace quota. */
+  async adminSetQuota(namespace: string, request: SetQuotaRequest): Promise<SetQuotaResponse> {
+    return this.request<SetQuotaResponse>('PUT', `/admin/quotas/${namespace}`, request);
+  }
+
+  /** DELETE /admin/quotas/{namespace} — remove namespace quota. */
+  async adminDeleteQuota(namespace: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('DELETE', `/admin/quotas/${namespace}`);
+  }
+
+  /** POST /admin/quotas/{namespace}/check — check if operation would exceed quota. */
+  async adminCheckQuota(namespace: string, request: QuotaCheckRequest): Promise<QuotaCheckResult> {
+    return this.request<QuotaCheckResult>('POST', `/admin/quotas/${namespace}/check`, request);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin — Slow Queries
+  // ---------------------------------------------------------------------------
+
+  /** GET /admin/slow-queries — list recent slow queries. */
+  async adminListSlowQueries(params?: { namespace?: string; query_type?: string; limit?: number }): Promise<unknown[]> {
+    const qs = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
+    const path = qs ? `/admin/slow-queries?${qs}` : '/admin/slow-queries';
+    return this.request<unknown[]>('GET', path);
+  }
+
+  /** GET /admin/slow-queries/summary — slow query summary. */
+  async adminSlowQuerySummary(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/admin/slow-queries/summary');
+  }
+
+  /** DELETE /admin/slow-queries — clear slow query log. */
+  async adminClearSlowQueries(namespace?: string): Promise<Record<string, unknown>> {
+    const path = namespace ? `/admin/slow-queries?namespace=${encodeURIComponent(namespace)}` : '/admin/slow-queries';
+    return this.request<Record<string, unknown>>('DELETE', path);
+  }
+
+  /** PATCH /admin/slow-queries/config — update slow query configuration. */
+  async adminUpdateSlowQueryConfig(config: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('PATCH', '/admin/slow-queries/config', config);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin — Backups
+  // ---------------------------------------------------------------------------
+
+  /** GET /admin/backups — list all backups. */
+  async adminListBackups(): Promise<BackupListResponse> {
+    return this.request<BackupListResponse>('GET', '/admin/backups');
+  }
+
+  /** POST /admin/backups — create a new backup. */
+  async adminCreateBackup(request: CreateBackupRequest): Promise<CreateBackupResponse> {
+    return this.request<CreateBackupResponse>('POST', '/admin/backups', request);
+  }
+
+  /** GET /admin/backups/{id} — get backup details. */
+  async adminGetBackup(backupId: string): Promise<BackupInfo> {
+    return this.request<BackupInfo>('GET', `/admin/backups/${backupId}`);
+  }
+
+  /** DELETE /admin/backups/{id} — delete a backup. */
+  async adminDeleteBackup(backupId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('DELETE', `/admin/backups/${backupId}`);
+  }
+
+  /** GET /admin/backups/schedule — get backup schedule. */
+  async adminGetBackupSchedule(): Promise<BackupSchedule> {
+    return this.request<BackupSchedule>('GET', '/admin/backups/schedule');
+  }
+
+  /** POST /admin/backups/schedule — update backup schedule. */
+  async adminUpdateBackupSchedule(request: UpdateBackupScheduleRequest): Promise<BackupSchedule> {
+    return this.request<BackupSchedule>('POST', '/admin/backups/schedule', request);
+  }
+
+  /** POST /admin/backups/restore — restore from backup. */
+  async adminRestoreBackup(request: RestoreBackupRequest): Promise<RestoreBackupResponse> {
+    return this.request<RestoreBackupResponse>('POST', '/admin/backups/restore', request);
+  }
+
+  /** GET /admin/backups/restore/{id} — restore operation status. */
+  async adminGetRestoreStatus(restoreId: string): Promise<RestoreBackupResponse> {
+    return this.request<RestoreBackupResponse>('GET', `/admin/backups/restore/${restoreId}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ops — Diagnostics & Jobs
+  // ---------------------------------------------------------------------------
+
+  /** GET /ops/diagnostics — system diagnostics. */
+  async opsDiagnostics(): Promise<SystemDiagnostics> {
+    return this.request<SystemDiagnostics>('GET', '/ops/diagnostics');
+  }
+
+  /** GET /ops/jobs — list background jobs. */
+  async opsListJobs(): Promise<JobInfo[]> {
+    return this.request<JobInfo[]>('GET', '/ops/jobs');
+  }
+
+  /** GET /ops/jobs/{id} — get job status. */
+  async opsGetJob(jobId: string): Promise<JobInfo> {
+    return this.request<JobInfo>('GET', `/ops/jobs/${jobId}`);
+  }
+
+  /** POST /ops/compact — trigger compaction. */
+  async opsCompact(request?: CompactionRequest): Promise<CompactionResponse> {
+    return this.request<CompactionResponse>('POST', '/ops/compact', request ?? {});
+  }
+
+  /** POST /ops/shutdown — request graceful shutdown. */
+  async opsShutdown(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('POST', '/ops/shutdown');
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Phase 3 — Engine Parity
+  // ────────────────────────────────────────────────────────────
+
+  /** GET /v1/namespaces/{namespace}/fulltext/stats — full-text index statistics. */
+  async fulltextStats(namespace: string): Promise<FullTextIndexStats> {
+    return this.request<FullTextIndexStats>(
+      'GET',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/stats`,
+    );
+  }
+
+  /** POST /v1/namespaces/{namespace}/fulltext/delete — delete documents from full-text index. */
+  async fulltextDelete(namespace: string, ids: string[]): Promise<FulltextDeleteResponse> {
+    return this.request<FulltextDeleteResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/delete`,
+      { ids },
+    );
+  }
+
+  /** GET /admin/ttl/stats — TTL statistics across all namespaces. */
+  async adminTtlStats(): Promise<TtlStatsResponse> {
+    return this.request<TtlStatsResponse>('GET', '/admin/ttl/stats');
+  }
+
+  /** POST /v1/route — route a query to the best-matching namespace(s). */
+  async routeQuery(request: RouteRequest): Promise<RouteResponse> {
+    return this.request<RouteResponse>('POST', '/v1/route', request);
+  }
+
+  /** GET /v1/import/{job_id}/status — check import job progress. */
+  async importJobStatus(jobId: string): Promise<ImportJobStatus> {
+    return this.request<ImportJobStatus>(
+      'GET',
+      `/v1/import/${encodeURIComponent(jobId)}/status`,
+    );
+  }
+
+  /** GET /admin/backups/{id}/download — download a backup as binary data. */
+  async adminDownloadBackup(backupId: string): Promise<ArrayBuffer> {
+    const url = `${this.baseUrl}/admin/backups/${encodeURIComponent(backupId)}/download`;
+    const response = await fetch(url, {
+      headers: { ...this.headers, Accept: 'application/octet-stream' },
+    });
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status}`);
+    }
+    return response.arrayBuffer();
+  }
+
+  /** POST /admin/backups/upload — upload a backup archive. */
+  async adminUploadBackup(data: ArrayBuffer | Uint8Array): Promise<CreateBackupResponse> {
+    const url = `${this.baseUrl}/admin/backups/upload`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    headers['Content-Type'] = 'application/gzip';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: data instanceof ArrayBuffer ? data : (data as unknown as BodyInit),
+    });
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+    return response.json() as Promise<CreateBackupResponse>;
+  }
+
+  /** GET /admin/storage/tiers — storage tier overview. */
+  async adminStorageTierOverview(): Promise<StorageTierOverview> {
+    return this.request<StorageTierOverview>('GET', '/admin/storage/tiers');
+  }
+
+  /** GET /admin/background-activity — current background activity. */
+  async adminBackgroundActivity(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/admin/background-activity');
+  }
+
+  /** GET /admin/memory-type-stats — memory type distribution statistics. */
+  async adminMemoryTypeStats(): Promise<MemoryTypeStatsResponse> {
+    return this.request<MemoryTypeStatsResponse>('GET', '/admin/memory-type-stats');
+  }
+
+  /** POST /admin/namespaces/migrate-dimensions — migrate namespace embedding dimensions. */
+  async adminMigrateNamespaceDimensions(
+    request?: MigrateNamespaceDimensionsRequest,
+  ): Promise<MigrateDimensionsResponse> {
+    return this.request<MigrateDimensionsResponse>(
+      'POST',
+      '/admin/namespaces/migrate-dimensions',
+      request ?? {},
+    );
   }
 }
