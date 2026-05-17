@@ -1250,7 +1250,7 @@ describe('DakeraClient', () => {
       expect(url).toContain('/v1/memories/extract');
       expect(opts.method).toBe('POST');
       const body = JSON.parse(opts.body as string);
-      expect(body.text).toBe('Alice works at Dakera.');
+      expect(body.content).toBe('Alice works at Dakera.');
       expect(body.entity_types).toBeUndefined();
     });
 
