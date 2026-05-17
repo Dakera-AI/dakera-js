@@ -2,13 +2,14 @@
  * Integration tests against a real Dakera server (Docker service in CI).
  *
  * Requires DAKERA_TEST_URL env var pointing to a running Dakera instance.
- * Auth is disabled on the test server (DAKERA_AUTH_ENABLED=false).
+ * Auth is enabled — set DAKERA_API_KEY to a valid key (default: test-key).
  *
- * Run locally: DAKERA_TEST_URL=http://localhost:3000 npx vitest run src/integration.test.ts
+ * Run locally: DAKERA_TEST_URL=http://localhost:3000 DAKERA_API_KEY=test-key npx vitest run src/integration.test.ts
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { DakeraClient } from "./client";
+import { AuthenticationError } from "./errors";
 
 const DAKERA_URL = process.env.DAKERA_TEST_URL || "http://localhost:3000";
 const TEST_NAMESPACE = `integ-${crypto.randomUUID().slice(0, 8)}`;
@@ -28,7 +29,7 @@ let client: DakeraClient;
 
 beforeAll(async () => {
   if (skip) return;
-  client = new DakeraClient({ baseUrl: DAKERA_URL, apiKey: "test-key" });
+  client = new DakeraClient({ baseUrl: DAKERA_URL, apiKey: process.env.DAKERA_API_KEY || "test-key" });
   await client.createNamespace(TEST_NAMESPACE, { dimensions: 1024 });
 });
 
@@ -249,5 +250,17 @@ describeIntegration("Error Handling", () => {
     await expect(
       client.getMemory(TEST_AGENT, "nonexistent-memory-id"),
     ).rejects.toThrow();
+  });
+});
+
+describeIntegration("Authentication", () => {
+  it("rejects requests with invalid API key", async () => {
+    const badClient = new DakeraClient({ baseUrl: DAKERA_URL, apiKey: "invalid-key-xxx" });
+    await expect(badClient.listNamespaces()).rejects.toThrow(AuthenticationError);
+  });
+
+  it("accepts requests with valid API key", async () => {
+    const namespaces = await client.listNamespaces();
+    expect(Array.isArray(namespaces)).toBe(true);
   });
 });

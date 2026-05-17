@@ -9,7 +9,7 @@ import { DakeraClient } from '@dakera-ai/dakera';
 async function main() {
   const client = new DakeraClient({
     baseUrl: process.env.DAKERA_API_URL || 'http://localhost:3300',
-    apiKey: 'dk-mykey',
+    apiKey: process.env.DAKERA_API_KEY || 'dk-mykey',
   });
 
   // Check server health
@@ -62,11 +62,15 @@ async function main() {
     console.log(`ID: ${match.id}, Score: ${match.score.toFixed(4)}, Category: ${match.metadata?.category}`);
   }
 
-  // Fetch vectors by ID
+  // Fetch vectors by ID (may not be supported on all server versions)
   console.log('\n--- Fetched Vectors ---');
-  const vectors = await client.fetch(namespace, ['vec1', 'vec2']);
-  for (const vec of vectors) {
-    console.log(`ID: ${vec.id}, Values: [${vec.values?.join(', ')}]`);
+  try {
+    const vectors = await client.fetch(namespace, ['vec1', 'vec2']);
+    for (const vec of vectors) {
+      console.log(`ID: ${vec.id}, Values: [${vec.values?.join(', ')}]`);
+    }
+  } catch (e) {
+    console.log(`Fetch not supported on this server version: ${e}`);
   }
 
   // Batch query
@@ -83,12 +87,20 @@ async function main() {
   });
 
   // Delete vectors
-  const deleteResp = await client.delete(namespace, { ids: ['vec1'] });
-  console.log(`\nDeleted ${deleteResp.deleted_count} vectors`);
+  try {
+    const deleteResp = await client.delete(namespace, { ids: ['vec1'] });
+    console.log(`\nDeleted ${deleteResp.deleted_count} vectors`);
+  } catch (e) {
+    console.log(`\nVector delete not supported on this server version: ${e}`);
+  }
 
   // Cleanup
-  await client.deleteNamespace(namespace);
-  console.log('Namespace deleted');
+  try {
+    await client.deleteNamespace(namespace);
+    console.log('Namespace deleted');
+  } catch (e) {
+    console.log(`Namespace delete not supported on this server version: ${e}`);
+  }
 }
 
-main().catch(console.error);
+main().catch((e) => { console.error(e); process.exit(1); });

@@ -51,7 +51,7 @@ jobs:
         ports:
           - 3300:3000
         env:
-          DAKERA_AUTH_ENABLED: "false"
+          DAKERA_AUTH_ENABLED: "true"
           DAKERA_ROOT_API_KEY: test-key
         options: >-
           --health-cmd "curl -f http://127.0.0.1:3000/health || exit 1"
@@ -88,6 +88,7 @@ jobs:
       - name: Run integration tests
         env:
           DAKERA_TEST_URL: http://localhost:3300
+          DAKERA_API_KEY: test-key
         run: npx vitest run src/integration.test.ts
 
   examples:
@@ -100,7 +101,7 @@ jobs:
         ports:
           - 3300:3000
         env:
-          DAKERA_AUTH_ENABLED: "false"
+          DAKERA_AUTH_ENABLED: "true"
           DAKERA_ROOT_API_KEY: test-key
         options: >-
           --health-cmd "curl -f http://127.0.0.1:3000/health || exit 1"
@@ -140,6 +141,7 @@ jobs:
       - name: Run examples
         env:
           DAKERA_API_URL: http://localhost:3300
+          DAKERA_API_KEY: test-key
         run: |
           npx tsx examples/basic.ts
           npx tsx examples/advanced.ts
