@@ -52,28 +52,28 @@ describeIntegration("Namespaces", () => {
   it("creates a namespace", async () => {
     const ns = `integ-create-${crypto.randomUUID().slice(0, 8)}`;
     const result = await client.createNamespace(ns, { dimensions: 384 });
-    expect(result.name).toBe(ns);
+    expect(result.namespace).toBe(ns);
     await client.deleteNamespace(ns);
   });
 
   it("lists namespaces", async () => {
     const namespaces = await client.listNamespaces();
-    const names = namespaces.map((ns) => ns.name);
+    const names = namespaces.map((ns) => ns.namespace);
     expect(names).toContain(TEST_NAMESPACE);
   });
 
   it("gets a namespace", async () => {
     const ns = await client.getNamespace(TEST_NAMESPACE);
-    expect(ns.name).toBe(TEST_NAMESPACE);
-    expect(ns.dimensions).toBe(384);
+    expect(ns.namespace).toBe(TEST_NAMESPACE);
+    expect(ns.dimension).toBe(384);
   });
 
   it("configures a namespace", async () => {
     const result = await client.configureNamespace(TEST_NAMESPACE, {
-      ef_construction: 128,
-      m: 16,
+      dimension: 384,
     });
     expect(result).toBeDefined();
+    expect(result.namespace).toBe(TEST_NAMESPACE);
   });
 
   it("deletes a namespace", async () => {
@@ -81,7 +81,7 @@ describeIntegration("Namespaces", () => {
     await client.createNamespace(ns, { dimensions: 384 });
     await client.deleteNamespace(ns);
     const namespaces = await client.listNamespaces();
-    const names = namespaces.map((n) => n.name);
+    const names = namespaces.map((n) => n.namespace);
     expect(names).not.toContain(ns);
   });
 });
@@ -91,16 +91,16 @@ describeIntegration("Memory CRUD", () => {
     const result = await client.storeMemory(TEST_AGENT, {
       content: "The user prefers dark mode interfaces",
       importance: 0.8,
-      tags: ["preference", "ui"],
+      metadata: { tags: ["preference", "ui"] },
     });
-    expect(result.id).toBeDefined();
+    expect(result.memory.id).toBeDefined();
   });
 
   it("recalls memories semantically", async () => {
     await client.storeMemory(TEST_AGENT, {
       content: "Python is the user's primary programming language",
       importance: 0.9,
-      tags: ["preference", "coding"],
+      metadata: { tags: ["preference", "coding"] },
     });
     await new Promise((r) => setTimeout(r, 500));
     const results = await client.recall(TEST_AGENT, "programming language");
@@ -110,7 +110,7 @@ describeIntegration("Memory CRUD", () => {
   it("batch recalls memories", async () => {
     const result = await client.batchRecall({
       agent_id: TEST_AGENT,
-      min_importance: 0.5,
+      filter: { min_importance: 0.5 },
     });
     expect(result.memories).toBeDefined();
     expect(result.memories.length).toBeGreaterThan(0);
@@ -121,7 +121,7 @@ describeIntegration("Memory CRUD", () => {
       content: "Memory for get test",
       importance: 0.7,
     });
-    const memory = await client.getMemory(TEST_AGENT, stored.id);
+    const memory = await client.getMemory(TEST_AGENT, stored.memory.id);
     expect(memory).toBeDefined();
   });
 
@@ -131,7 +131,7 @@ describeIntegration("Memory CRUD", () => {
       importance: 0.5,
     });
     const result = await client.updateImportance(TEST_AGENT, {
-      memory_ids: [stored.id],
+      memory_ids: [stored.memory.id],
       importance: 0.95,
     });
     expect(result).toBeDefined();
@@ -142,7 +142,7 @@ describeIntegration("Memory CRUD", () => {
       content: "Memory to forget",
       importance: 0.3,
     });
-    const result = await client.forget(TEST_AGENT, stored.id);
+    const result = await client.forget(TEST_AGENT, stored.memory.id);
     expect(result).toBeDefined();
   });
 });
@@ -172,24 +172,25 @@ describeIntegration("Vectors / Text", () => {
     const result = await client.queryText(
       TEST_NAMESPACE,
       "AI neural networks",
-      { top_k: 3 },
+      { topK: 3 },
     );
     expect(result).toBeDefined();
   });
 
   it("performs hybrid search", async () => {
     await new Promise((r) => setTimeout(r, 500));
-    const results = await client.hybridSearch(TEST_NAMESPACE, {
-      query: "machine learning data",
-      top_k: 3,
-    });
+    const results = await client.hybridSearch(
+      TEST_NAMESPACE,
+      "machine learning data",
+      { topK: 3 },
+    );
     expect(results).toBeDefined();
   });
 
   it("performs fulltext search", async () => {
     await new Promise((r) => setTimeout(r, 500));
     const results = await client.fulltextSearch(TEST_NAMESPACE, "neural networks", {
-      top_k: 3,
+      topK: 3,
     });
     expect(results).toBeDefined();
   });
@@ -198,7 +199,7 @@ describeIntegration("Vectors / Text", () => {
     const result = await client.batchQueryText(
       TEST_NAMESPACE,
       ["machine learning", "deep learning"],
-      { top_k: 2 },
+      { topK: 2 },
     );
     expect(result).toBeDefined();
   });
@@ -211,14 +212,14 @@ describeIntegration("Knowledge Graph", () => {
       importance: 0.8,
     });
     await new Promise((r) => setTimeout(r, 500));
-    const result = await client.memoryGraph(stored.id, { depth: 1 });
+    const result = await client.memoryGraph(stored.memory.id, { depth: 1 });
     expect(result).toBeDefined();
   });
 
   it("extracts entities", async () => {
-    const result = await client.extractEntities(TEST_NAMESPACE, {
-      text: "OpenAI released GPT-4 in San Francisco",
-    });
+    const result = await client.extractEntities(
+      "OpenAI released GPT-4 in San Francisco",
+    );
     expect(result).toBeDefined();
   });
 });

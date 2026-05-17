@@ -683,11 +683,11 @@ export class DakeraClient {
    * @returns Array of namespace info
    */
   async listNamespaces(): Promise<NamespaceInfo[]> {
-    const response = await this.request<{ namespaces: NamespaceInfo[] }>(
+    const response = await this.request<{ namespaces: string[] }>(
       'GET',
       '/v1/namespaces'
     );
-    return response.namespaces;
+    return response.namespaces.map((ns) => ({ namespace: ns, vector_count: 0 }));
   }
 
   /**
@@ -711,12 +711,17 @@ export class DakeraClient {
     namespace: string,
     options: { dimensions?: number; indexType?: string; metadata?: Record<string, unknown> } = {}
   ): Promise<NamespaceInfo> {
-    const body: Record<string, unknown> = { name: namespace };
+    const body: Record<string, unknown> = {};
     if (options.dimensions) body.dimension = options.dimensions;
     if (options.indexType) body.index_type = options.indexType;
     if (options.metadata) body.metadata = options.metadata;
 
-    return this.request<NamespaceInfo>('POST', '/v1/namespaces', body);
+    const response = await this.request<ConfigureNamespaceResponse>(
+      'PUT',
+      `/v1/namespaces/${namespace}`,
+      body
+    );
+    return { namespace: response.namespace, vector_count: 0, dimension: response.dimension };
   }
 
   /**

@@ -268,17 +268,14 @@ describe('DakeraClient', () => {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
-          namespaces: [
-            { name: 'ns1', vectorCount: 100 },
-            { name: 'ns2', vectorCount: 200 },
-          ],
+          namespaces: ['ns1', 'ns2'],
         }),
       });
 
       const namespaces = await client.listNamespaces();
 
       expect(namespaces).toHaveLength(2);
-      expect(namespaces[0].name).toBe('ns1');
+      expect(namespaces[0].namespace).toBe('ns1');
     });
 
     it('should get namespace', async () => {
@@ -286,16 +283,16 @@ describe('DakeraClient', () => {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
-          name: 'test-ns',
-          vectorCount: 1000,
-          dimensions: 384,
+          namespace: 'test-ns',
+          vector_count: 1000,
+          dimension: 384,
         }),
       });
 
       const info = await client.getNamespace('test-ns');
 
-      expect(info.name).toBe('test-ns');
-      expect(info.vectorCount).toBe(1000);
+      expect(info.namespace).toBe('test-ns');
+      expect(info.vector_count).toBe(1000);
     });
 
     it('should create namespace', async () => {
@@ -303,15 +300,16 @@ describe('DakeraClient', () => {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
-          name: 'new-ns',
-          vectorCount: 0,
-          dimensions: 384,
+          namespace: 'new-ns',
+          dimension: 384,
+          distance: 'cosine',
+          created: true,
         }),
       });
 
       const info = await client.createNamespace('new-ns', { dimensions: 384 });
 
-      expect(info.name).toBe('new-ns');
+      expect(info.namespace).toBe('new-ns');
     });
 
     it('should delete namespace', async () => {
@@ -880,7 +878,7 @@ describe('DakeraClient', () => {
         ok: true,
         status: 200,
         headers: new Headers({ 'content-type': 'application/json' }),
-        json: async () => ({ id: 'mem_1', content: 'test' }),
+        json: async () => ({ memory: { id: 'mem_1', content: 'test' }, embedding_time_ms: 10 }),
       });
 
       await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic', expires_at: 1800000000 });
@@ -897,7 +895,7 @@ describe('DakeraClient', () => {
         ok: true,
         status: 200,
         headers: new Headers({ 'content-type': 'application/json' }),
-        json: async () => ({ id: 'mem_1', content: 'test' }),
+        json: async () => ({ memory: { id: 'mem_1', content: 'test' }, embedding_time_ms: 10 }),
       });
 
       await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic' });
