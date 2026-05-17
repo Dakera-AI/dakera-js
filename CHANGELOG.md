@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.55] - 2026-05-17
+
+### Changed
+
+- **BREAKING: `hybridSearch` option renamed `alpha` → `vectorWeight`** — the blending
+  parameter that controls the vector-vs-BM25 weight has been renamed from `alpha` to
+  `vectorWeight` for consistency with `recall()`'s existing `vectorWeight` option. Update
+  all call sites:
+  ```ts
+  // Before
+  client.hybridSearch('ns', 'query', { vector: [...], alpha: 0.7 })
+  // After
+  client.hybridSearch('ns', 'query', { vector: [...], vectorWeight: 0.7 })
+  ```
+
+### Added
+
+- **Docker integration tests in CI** — full end-to-end integration tests run against a live
+  Dakera server container on every PR and push.
+
 ## [0.11.54] - 2026-05-13
 
 ### Notes
