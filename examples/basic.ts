@@ -9,7 +9,7 @@ import { DakeraClient } from '@dakera-ai/dakera';
 async function main() {
   const client = new DakeraClient({
     baseUrl: process.env.DAKERA_API_URL || 'http://localhost:3300',
-    apiKey: 'dk-mykey',
+    apiKey: process.env.DAKERA_API_KEY || 'dk-mykey',
   });
 
   // Check server health
@@ -91,4 +91,4 @@ async function main() {
   console.log('Namespace deleted');
 }
 
-main().catch(console.error);
+main().catch((e) => { console.error(e); process.exit(1); });
