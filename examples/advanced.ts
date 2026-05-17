@@ -61,7 +61,7 @@ async function main() {
 
   const hybridResults = await client.hybridSearch(namespace, 'semantic search', {
     topK: 5,
-    alpha: 0.7,
+    vectorWeight: 0.7,
   });
   console.log('Hybrid results:');
   for (const r of hybridResults) {

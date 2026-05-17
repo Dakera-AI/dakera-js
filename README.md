@@ -98,7 +98,7 @@ await client.upsert('my-namespace', [
 ]);
 
 // Hybrid search (vector + BM25)
-const results = await client.hybridSearch('my-namespace', 'completed task', { topK: 5 });
+const results = await client.hybridSearch('my-namespace', 'completed task', { topK: 5, vectorWeight: 0.7 });
 for (const r of results) {
   console.log(r.id, r.score);
 }
