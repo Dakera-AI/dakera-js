@@ -886,9 +886,10 @@ describe('DakeraClient', () => {
       await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic', expires_at: 1800000000 });
 
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/agents/agent-1/memories');
+      expect(url).toContain('/v1/memory/store');
       const body = JSON.parse(init?.body as string);
       expect(body.expires_at).toBe(1800000000);
+      expect(body.agent_id).toBe('agent-1');
     });
 
     it('omits expires_at from request body when not set', async () => {
@@ -1627,7 +1628,7 @@ describe('DakeraClient', () => {
       expect(result.memories).toHaveLength(1);
       expect(result.memories[0].content).toBe('user prefers code');
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/agents/agent-1/memories/recall');
+      expect(url).toContain('/v1/memory/recall');
       expect(init?.method).toBe('POST');
     });
 
@@ -1799,8 +1800,8 @@ describe('DakeraClient', () => {
 
       expect(result.status).toBe('deleted');
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/agents/agent-1/memories/mem_123');
-      expect(init?.method).toBe('DELETE');
+      expect(url).toContain('/v1/memory/forget');
+      expect(init?.method).toBe('POST');
     });
 
     it('should search memories with options', async () => {
@@ -1992,7 +1993,7 @@ describe('DakeraClient', () => {
 
       expect(result.merged_count).toBe(3);
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/agents/agent-1/memories/consolidate');
+      expect(url).toContain('/v1/memory/consolidate');
     });
   });
 });

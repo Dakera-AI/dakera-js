@@ -712,7 +712,7 @@ export class DakeraClient {
     options: { dimensions?: number; indexType?: string; metadata?: Record<string, unknown> } = {}
   ): Promise<NamespaceInfo> {
     const body: Record<string, unknown> = { name: namespace };
-    if (options.dimensions) body.dimensions = options.dimensions;
+    if (options.dimensions) body.dimension = options.dimensions;
     if (options.indexType) body.index_type = options.indexType;
     if (options.metadata) body.metadata = options.metadata;
 
@@ -1329,7 +1329,7 @@ export class DakeraClient {
 
   /** Store a memory for an agent */
   async storeMemory(agentId: string, request: StoreMemoryRequest): Promise<StoreMemoryResponse> {
-    return this.request<StoreMemoryResponse>('POST', `/v1/agents/${agentId}/memories`, request);
+    return this.request<StoreMemoryResponse>('POST', '/v1/memory/store', { ...request, agent_id: agentId });
   }
 
   /**
@@ -1363,22 +1363,22 @@ export class DakeraClient {
     if (options?.until !== undefined) body['until'] = options.until;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    return this.request<RecallResponse>('POST', `/v1/agents/${agentId}/memories/recall`, body);
+    return this.request<RecallResponse>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
   }
 
   /** Get a specific memory */
-  async getMemory(agentId: string, memoryId: string): Promise<Memory> {
-    return this.request<Memory>('GET', `/v1/agents/${agentId}/memories/${memoryId}`);
+  async getMemory(_agentId: string, memoryId: string): Promise<Memory> {
+    return this.request<Memory>('GET', `/v1/memory/get/${memoryId}`);
   }
 
   /** Update an existing memory */
-  async updateMemory(agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<StoreMemoryResponse> {
-    return this.request<StoreMemoryResponse>('PUT', `/v1/agents/${agentId}/memories/${memoryId}`, request);
+  async updateMemory(_agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<StoreMemoryResponse> {
+    return this.request<StoreMemoryResponse>('PUT', `/v1/memory/update/${memoryId}`, request);
   }
 
   /** Delete a memory */
   async forget(agentId: string, memoryId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/v1/agents/${agentId}/memories/${memoryId}`);
+    return this.request<{ status: string }>('POST', '/v1/memory/forget', { agent_id: agentId, memory_ids: [memoryId] });
   }
 
   /**
@@ -1427,24 +1427,24 @@ export class DakeraClient {
     if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    const result = await this.request<{ memories: RecalledMemory[] }>('POST', `/v1/agents/${agentId}/memories/search`, body);
+    const result = await this.request<{ memories: RecalledMemory[] }>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
     return result.memories ?? result as any;
   }
 
   /** Update importance of memories */
   async updateImportance(agentId: string, request: UpdateImportanceRequest): Promise<{ status: string }> {
-    return this.request<{ status: string }>('PUT', `/v1/agents/${agentId}/memories/importance`, request);
+    return this.request<{ status: string }>('POST', '/v1/memory/importance', { ...request, agent_id: agentId });
   }
 
   /** Consolidate memories for an agent */
   async consolidate(agentId: string, request?: ConsolidateRequest): Promise<ConsolidateResponse> {
-    return this.request<ConsolidateResponse>('POST', `/v1/agents/${agentId}/memories/consolidate`, request ?? {});
+    return this.request<ConsolidateResponse>('POST', '/v1/memory/consolidate', { ...(request ?? {}), agent_id: agentId });
   }
 
   /** Submit feedback on a memory recall */
   async memoryFeedback(agentId: string, request: MemoryFeedbackRequest): Promise<MemoryFeedbackResponse> {
-    return this.request<MemoryFeedbackResponse>('POST', `/v1/agents/${agentId}/memories/feedback`, request);
+    return this.request<MemoryFeedbackResponse>('POST', '/v1/memory/feedback', { ...request, agent_id: agentId });
   }
 
   // ===========================================================================
