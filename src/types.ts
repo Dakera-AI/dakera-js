@@ -1372,13 +1372,34 @@ export interface SlowQuery {
   namespace?: string;
 }
 
+/** Backup type. */
+export type BackupType = 'full' | 'incremental' | 'snapshot';
+
+/** Backup status. */
+export type BackupStatus = 'inprogress' | 'completed' | 'failed' | 'deleting';
+
+/** Compression type. */
+export type CompressionType = 'none' | 'zstd' | 'lz4';
+
+/** Restore status. */
+export type RestoreStatus = 'inprogress' | 'completed' | 'failed';
+
 /** Backup info */
 export interface BackupInfo {
-  id: string;
-  created_at: string;
+  backup_id: string;
+  name: string;
+  backup_type: BackupType;
+  status: BackupStatus;
+  namespaces: string[];
+  vector_count: number;
   size_bytes: number;
-  status: string;
-  include_data: boolean;
+  created_at: number;
+  completed_at?: number;
+  duration_seconds?: number;
+  storage_path?: string;
+  error?: string;
+  encrypted: boolean;
+  compression?: CompressionType;
 }
 
 /** TTL configuration */
@@ -2341,4 +2362,274 @@ export interface ExtractorConfig {
   provider: string;
   model?: string;
   base_url?: string;
+}
+
+/** Cluster replication status. */
+export interface ReplicationStatus {
+  replication_factor: number;
+  healthy_replicas: number;
+  total_nodes: number;
+  replication_lag: NodeReplicationLag[];
+}
+
+/** Per-node replication lag. */
+export interface NodeReplicationLag {
+  node_id: string;
+  lag_ms: number;
+  status: string;
+}
+
+/** Shard information. */
+export interface ShardInfo {
+  shard_id: string;
+  namespace: string;
+  primary_node: string;
+  replica_nodes: string[];
+  state: string;
+  vector_count: number;
+  size_bytes: number;
+}
+
+/** Response from GET /admin/cluster/shards. */
+export interface ShardListResponse {
+  shards: ShardInfo[];
+  total: number;
+}
+
+/** Request for POST /admin/cluster/shards/rebalance. */
+export interface ShardRebalanceRequest {
+  shard_ids?: string[];
+  dry_run?: boolean;
+}
+
+/** Response from POST /admin/cluster/shards/rebalance. */
+export interface ShardRebalanceResponse {
+  initiated: boolean;
+  operation_id: string;
+  shards_affected: number;
+  estimated_seconds?: number;
+  planned_moves: Array<{ shard_id: string; from_node: string; to_node: string }>;
+}
+
+/** Maintenance mode status. */
+export interface MaintenanceStatus {
+  enabled: boolean;
+  reason?: string;
+  enabled_at?: number;
+  scheduled_end?: number;
+  nodes_in_maintenance: string[];
+  rejecting_requests: boolean;
+}
+
+/** Request for POST /admin/cluster/maintenance/enable. */
+export interface EnableMaintenanceRequest {
+  reason: string;
+  node_ids?: string[];
+  reject_requests?: boolean;
+  duration_minutes?: number;
+}
+
+/** Request for POST /admin/cluster/maintenance/disable. */
+export interface DisableMaintenanceRequest {
+  force?: boolean;
+}
+
+/** Quota enforcement mode. */
+export type QuotaEnforcement = 'none' | 'soft' | 'hard';
+
+/** Quota configuration for a namespace. */
+export interface QuotaConfig {
+  max_vectors?: number;
+  max_storage_bytes?: number;
+  max_dimensions?: number;
+  max_metadata_bytes?: number;
+  enforcement?: QuotaEnforcement;
+}
+
+/** Quota usage for a namespace. */
+export interface QuotaUsage {
+  vector_count: number;
+  storage_bytes: number;
+  avg_dimensions?: number;
+  avg_metadata_bytes?: number;
+  last_updated: number;
+}
+
+/** Combined quota status. */
+export interface QuotaStatus {
+  namespace: string;
+  config: QuotaConfig;
+  usage: QuotaUsage;
+  vector_usage_percent?: number;
+  storage_usage_percent?: number;
+  is_exceeded: boolean;
+  exceeded_quotas: string[];
+}
+
+/** Response from GET /admin/quotas. */
+export interface QuotaListResponse {
+  quotas: QuotaStatus[];
+  total: number;
+  default_config?: QuotaConfig;
+}
+
+/** Response from GET /admin/quotas/default. */
+export interface DefaultQuotaResponse {
+  config?: QuotaConfig;
+}
+
+/** Request for PUT /admin/quotas/default. */
+export interface SetDefaultQuotaRequest {
+  config?: QuotaConfig;
+}
+
+/** Request for PUT /admin/quotas/{namespace}. */
+export interface SetQuotaRequest {
+  config: QuotaConfig;
+}
+
+/** Response from PUT /admin/quotas. */
+export interface SetQuotaResponse {
+  success: boolean;
+  namespace: string;
+  config: QuotaConfig;
+  message: string;
+}
+
+/** Request for POST /admin/quotas/{namespace}/check. */
+export interface QuotaCheckRequest {
+  vector_ids: string[];
+  dimensions?: number;
+  metadata_bytes?: number;
+}
+
+/** Response from POST /admin/quotas/{namespace}/check. */
+export interface QuotaCheckResult {
+  allowed: boolean;
+  reason?: string;
+  usage: QuotaUsage;
+  exceeded_quota?: string;
+}
+
+/** Response from GET /admin/backups. */
+export interface BackupListResponse {
+  backups: BackupInfo[];
+  total: number;
+}
+
+/** Request for POST /admin/backups. */
+export interface CreateBackupRequest {
+  name: string;
+  backup_type?: BackupType;
+  namespaces?: string[];
+  encrypt?: boolean;
+  compression?: CompressionType;
+}
+
+/** Response from POST /admin/backups. */
+export interface CreateBackupResponse {
+  backup: BackupInfo;
+  estimated_completion?: number;
+}
+
+/** Request for POST /admin/backups/restore. */
+export interface RestoreBackupRequest {
+  backup_id: string;
+  target_namespaces?: string[];
+  overwrite?: boolean;
+  point_in_time?: number;
+}
+
+/** Response from POST /admin/backups/restore. */
+export interface RestoreBackupResponse {
+  restore_id: string;
+  status: RestoreStatus;
+  backup_id: string;
+  namespaces: string[];
+  started_at: number;
+  estimated_completion?: number;
+  progress_percent?: number;
+  vectors_restored?: number;
+  completed_at?: number;
+  duration_seconds?: number;
+  error?: string;
+}
+
+/** Backup schedule configuration. */
+export interface BackupSchedule {
+  enabled: boolean;
+  cron?: string;
+  backup_type: BackupType;
+  retention_days: number;
+  max_backups: number;
+  namespaces: string[];
+  encrypt: boolean;
+  compression?: CompressionType;
+  last_backup_at?: number;
+  next_backup_at?: number;
+}
+
+/** Request for POST /admin/backups/schedule. */
+export interface UpdateBackupScheduleRequest {
+  enabled?: boolean;
+  cron?: string;
+  backup_type?: BackupType;
+  retention_days?: number;
+  max_backups?: number;
+  namespaces?: string[];
+  encrypt?: boolean;
+  compression?: CompressionType;
+}
+
+/** Ops job info. */
+export interface JobInfo {
+  id: string;
+  job_type: string;
+  status: string;
+  created_at: number;
+  started_at?: number;
+  completed_at?: number;
+  progress: number;
+  message?: string;
+  metadata: Record<string, string>;
+}
+
+/** System diagnostics. */
+export interface SystemDiagnostics {
+  system: {
+    version: string;
+    rust_version: string;
+    build_time: string;
+    uptime_seconds: number;
+    pid: number;
+  };
+  resources: {
+    memory_bytes: number;
+    memory_total_bytes: number;
+    thread_count: number;
+    open_fds: number;
+    cpu_percent?: number;
+  };
+  components: {
+    storage: { healthy: boolean; message: string; last_check: number };
+    search_engine: { healthy: boolean; message: string; last_check: number };
+    cache: { healthy: boolean; message: string; last_check: number };
+    grpc: { healthy: boolean; message: string; last_check: number };
+  };
+  active_jobs: number;
+  active_connections: number;
+  max_connections: number;
+  fragmentation_percent: number;
+}
+
+/** Request for POST /ops/compact. */
+export interface CompactionRequest {
+  namespace?: string;
+  force?: boolean;
+}
+
+/** Response from POST /ops/compact. */
+export interface CompactionResponse {
+  job_id: string;
+  message: string;
 }
