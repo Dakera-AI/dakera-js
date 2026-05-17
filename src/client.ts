@@ -1630,7 +1630,7 @@ export class DakeraClient {
     text: string,
     entityTypes?: string[],
   ): Promise<EntityExtractionResponse> {
-    const body: Record<string, unknown> = { text };
+    const body: Record<string, unknown> = { content: text };
     if (entityTypes !== undefined) {
       body['entity_types'] = entityTypes;
     }
