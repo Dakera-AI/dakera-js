@@ -11,7 +11,7 @@ import { DakeraClient } from '@dakera-ai/dakera';
 
 async function main() {
   const client = new DakeraClient({
-    baseUrl: 'http://localhost:3300',
+    baseUrl: process.env.DAKERA_API_URL || 'http://localhost:3300',
     apiKey: 'dk-mykey',
   });
 
