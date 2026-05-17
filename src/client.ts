@@ -629,11 +629,11 @@ export class DakeraClient {
    *
    * When `vector` is omitted the server falls back to BM25-only full-text
    * search. When provided, results are blended with vector similarity
-   * according to `alpha`.
+   * according to `vectorWeight`.
    *
    * @param namespace - Target namespace
    * @param query - Text query
-   * @param options - Search options: vector (optional), topK, alpha, filter
+   * @param options - Search options: vector (optional), topK, vectorWeight, filter
    * @returns Hybrid search results
    *
    * @example
@@ -642,7 +642,7 @@ export class DakeraClient {
    * const results = await client.hybridSearch('my-namespace', 'machine learning', {
    *   vector: [0.1, 0.2, 0.3],
    *   topK: 10,
-   *   alpha: 0.7, // 70% text, 30% vector
+   *   vectorWeight: 0.7, // 70% vector, 30% text
    * });
    * // BM25-only (no vector)
    * const results = await client.hybridSearch('my-namespace', 'machine learning');
@@ -651,12 +651,12 @@ export class DakeraClient {
   async hybridSearch(
     namespace: string,
     query: string,
-    options: { vector?: number[]; topK?: number; alpha?: number; filter?: FilterExpression } = {}
+    options: { vector?: number[]; topK?: number; vectorWeight?: number; filter?: FilterExpression } = {}
   ): Promise<HybridSearchResult[]> {
     const body: Record<string, unknown> = {
       text: query,
       top_k: options.topK ?? 10,
-      vector_weight: options.alpha ?? 0.5,
+      vector_weight: options.vectorWeight ?? 0.5,
     };
     if (options.vector != null) {
       body['vector'] = options.vector;

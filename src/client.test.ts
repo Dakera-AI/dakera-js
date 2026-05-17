@@ -230,7 +230,7 @@ describe('DakeraClient', () => {
       const results = await client.hybridSearch(
         'test-ns',
         'hello',
-        { vector: [0.1, 0.2, 0.3], alpha: 0.5 }
+        { vector: [0.1, 0.2, 0.3], vectorWeight: 0.5 }
       );
 
       expect(results).toHaveLength(1);
