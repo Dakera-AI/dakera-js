@@ -654,9 +654,9 @@ export class DakeraClient {
     options: { vector?: number[]; topK?: number; alpha?: number; filter?: FilterExpression } = {}
   ): Promise<HybridSearchResult[]> {
     const body: Record<string, unknown> = {
-      query,
+      text: query,
       top_k: options.topK ?? 10,
-      alpha: options.alpha ?? 0.5,
+      vector_weight: options.alpha ?? 0.5,
     };
     if (options.vector != null) {
       body['vector'] = options.vector;
@@ -1439,7 +1439,15 @@ export class DakeraClient {
 
   /** Update importance of memories */
   async updateImportance(agentId: string, request: UpdateImportanceRequest): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/v1/memory/importance', { ...request, agent_id: agentId });
+    let result: { status: string } = { status: 'ok' };
+    for (const memoryId of request.memory_ids) {
+      result = await this.request<{ status: string }>('POST', '/v1/memory/importance', {
+        agent_id: agentId,
+        memory_id: memoryId,
+        importance: request.importance,
+      });
+    }
+    return result;
   }
 
   /** Consolidate memories for an agent */
