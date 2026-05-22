@@ -38,11 +38,11 @@
 ```bash
 docker run -d \
   --name dakera \
-  -p 3300:3300 \
+  -p 3000:3000 \
   -e DAKERA_ROOT_API_KEY=dk-mykey \
   ghcr.io/dakera-ai/dakera:latest
 
-curl http://localhost:3300/health  # → {"status":"ok"}
+curl http://localhost:3000/health  # → {"status":"ok"}
 ```
 
 For persistent storage with Docker Compose:
@@ -73,7 +73,7 @@ Works with **Node.js** (20+), **Deno**, **Bun**, **Cloudflare Workers**, and mod
 import { DakeraClient } from '@dakera-ai/dakera';
 
 const client = new DakeraClient({
-  baseUrl: 'http://localhost:3300',
+  baseUrl: 'http://localhost:3000',
   apiKey: 'dk-mykey',
 });
 
@@ -143,19 +143,19 @@ import { DakeraClient } from '@dakera-ai/dakera';
 
 // Self-hosted
 const client = new DakeraClient({
-  baseUrl: 'http://your-server:3300',
+  baseUrl: 'http://your-server:3000',
   apiKey: 'your-key',
 });
 
 // Cloud (early access)
 const client = new DakeraClient({
-  baseUrl: 'http://localhost:3300',
+  baseUrl: 'http://localhost:3000',
   apiKey: 'your-key',
 });
 
 // With custom retry config
 const client = new DakeraClient({
-  baseUrl: 'http://localhost:3300',
+  baseUrl: 'http://localhost:3000',
   apiKey: 'your-key',
   retryBackoff: { maxRetries: 5, baseDelayMs: 200, maxDelayMs: 10000 },
 });
