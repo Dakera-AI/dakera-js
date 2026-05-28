@@ -93,6 +93,10 @@ export type {
   BatchRecallResponse,
   BatchForgetRequest,
   BatchForgetResponse,
+  BatchStoreMemoryItem,
+  BatchStoreMemoryRequest,
+  BatchStoreMemoryResponse,
+  BatchStoredMemory,
   // Rate-limit headers (OPS-1)
   RateLimitHeaders,
   // Session types

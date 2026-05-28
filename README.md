@@ -149,7 +149,7 @@ const client = new DakeraClient({
 
 // Cloud (early access)
 const client = new DakeraClient({
-  baseUrl: 'http://localhost:3000',
+  baseUrl: 'http://<your-server-ip>:3000',
   apiKey: 'your-key',
 });
 
