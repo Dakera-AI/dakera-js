@@ -1655,6 +1655,70 @@ export interface BatchForgetResponse {
 }
 
 // ============================================================================
+// Batch Store Memory Types (DAK-5508)
+// ============================================================================
+
+/**
+ * A single memory entry within a {@link BatchStoreMemoryRequest}.
+ *
+ * Mirrors `StoreMemoryRequest` but omits `agent_id` — supplied at batch level.
+ */
+export interface BatchStoreMemoryItem {
+  /** Memory content text (required, max 100 000 chars). */
+  content: string;
+  /** One of `"episodic"`, `"semantic"`, `"procedural"`, or `"working"`. */
+  memory_type?: MemoryType;
+  /** Importance score 0.0–1.0 (default: 0.5). */
+  importance?: number;
+  /** Optional tags to associate with the memory. */
+  tags?: string[];
+  /** Optional session ID to associate with. */
+  session_id?: string;
+  /** Arbitrary metadata dictionary. */
+  metadata?: Record<string, unknown>;
+  /** Optional TTL in seconds. */
+  ttl_seconds?: number;
+  /** Optional explicit expiry as a Unix timestamp (seconds). */
+  expires_at?: number;
+  /** Optional custom ID. Auto-generated if not provided. */
+  id?: string;
+}
+
+/**
+ * Request body for `POST /v1/memories/store/batch` (DAK-5508).
+ *
+ * Accepts up to 1 000 memories per call. The server embeds all contents in a
+ * single ONNX inference pass, yielding ≥100× throughput vs. N sequential
+ * single-store calls.
+ */
+export interface BatchStoreMemoryRequest {
+  /** Agent namespace to store the memories in. */
+  agent_id: string;
+  /** Memories to store (1–1000 items). */
+  memories: BatchStoreMemoryItem[];
+}
+
+/** A single stored memory returned in a {@link BatchStoreMemoryResponse}. */
+export interface BatchStoredMemory {
+  id: string;
+  content: string;
+  agent_id: string;
+  tags: string[];
+  importance: number;
+  created_at: number;
+}
+
+/** Response from `POST /v1/memories/store/batch`. */
+export interface BatchStoreMemoryResponse {
+  /** Stored memories in the same order as the request items. */
+  stored: BatchStoredMemory[];
+  /** Number of memories successfully stored. */
+  stored_count: number;
+  /** Time spent on ONNX embedding for the entire batch (milliseconds). */
+  total_embedding_time_ms: number;
+}
+
+// ============================================================================
 // Memory Knowledge Graph Types (CE-5 / SDK-9)
 // ============================================================================
 

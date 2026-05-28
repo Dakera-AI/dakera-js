@@ -577,6 +577,44 @@ describe('DakeraClient', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // DAK-5508: Batch Store Memory
+  // ---------------------------------------------------------------------------
+
+  describe('storeMemoriesBatch', () => {
+    it('POSTs to /v1/memories/store/batch and returns BatchStoreMemoryResponse', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          stored: [
+            { id: 'mem-1', content: 'Dark mode', agent_id: 'agent-1', tags: [], importance: 0.8, created_at: 1700000000 },
+            { id: 'mem-2', content: 'Berlin user', agent_id: 'agent-1', tags: [], importance: 0.7, created_at: 1700000001 },
+          ],
+          stored_count: 2,
+          total_embedding_time_ms: 42,
+        }),
+      });
+
+      const resp = await client.storeMemoriesBatch({
+        agent_id: 'agent-1',
+        memories: [
+          { content: 'Dark mode', importance: 0.8 },
+          { content: 'Berlin user', importance: 0.7 },
+        ],
+      });
+
+      expect(resp.stored_count).toBe(2);
+      expect(resp.stored).toHaveLength(2);
+      expect(resp.stored[0].id).toBe('mem-1');
+      expect(resp.total_embedding_time_ms).toBe(42);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memories/store/batch');
+      expect(init?.method).toBe('POST');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // OPS-1: Rate-Limit Headers (v0.7.0)
   // ---------------------------------------------------------------------------
 

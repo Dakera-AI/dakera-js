@@ -120,6 +120,8 @@ import type {
   BatchRecallResponse,
   BatchForgetRequest,
   BatchForgetResponse,
+  BatchStoreMemoryRequest,
+  BatchStoreMemoryResponse,
   RateLimitHeaders,
   AutoPilotStatusResponse,
   AutoPilotConfigRequest,
@@ -1535,6 +1537,29 @@ export class DakeraClient {
    */
   async batchForget(request: BatchForgetRequest): Promise<BatchForgetResponse> {
     return this.request<BatchForgetResponse>('DELETE', '/v1/memories/forget/batch', request);
+  }
+
+  /**
+   * Store multiple memories in a single request (DAK-5508).
+   *
+   * Uses `POST /v1/memories/store/batch`. The server embeds all contents in a
+   * single ONNX inference pass, yielding ≥100× throughput vs. N sequential
+   * single-store calls. Accepts up to 1 000 memories per call.
+   *
+   * @example
+   * ```ts
+   * const resp = await client.storeMemoriesBatch({
+   *   agent_id: 'agent-1',
+   *   memories: [
+   *     { content: 'The user prefers dark mode', importance: 0.8 },
+   *     { content: 'The user is based in Berlin', importance: 0.7 },
+   *   ],
+   * });
+   * console.log(`Stored ${resp.stored_count} memories`);
+   * ```
+   */
+  async storeMemoriesBatch(request: BatchStoreMemoryRequest): Promise<BatchStoreMemoryResponse> {
+    return this.request<BatchStoreMemoryResponse>('POST', '/v1/memories/store/batch', request);
   }
 
   /** Search memories for an agent */
