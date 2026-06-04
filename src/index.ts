@@ -327,6 +327,8 @@ export type {
   MigrateNamespaceDimensionsRequest,
   NamespaceMigrationResult,
   MigrateDimensionsResponse,
+  DrainReembedRequest,
+  DrainReembedResponse,
 } from './types';
 
 // Errors

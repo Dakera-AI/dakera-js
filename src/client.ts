@@ -222,6 +222,8 @@ import type {
   MemoryTypeStatsResponse,
   MigrateNamespaceDimensionsRequest,
   MigrateDimensionsResponse,
+  DrainReembedRequest,
+  DrainReembedResponse,
 } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
@@ -3180,5 +3182,18 @@ export class DakeraClient {
       '/admin/namespaces/migrate-dimensions',
       request ?? {},
     );
+  }
+
+  /**
+   * POST /admin/reembed/drain — synchronously drain all static vectors to full ONNX quality (v0.11.82+).
+   *
+   * Runs the re-embedding upgrade loop until zero `_embedding_kind=static` vectors remain
+   * across all namespaces, or `timeout_secs` elapses. Requires Admin scope. Useful as a
+   * pre-benchmark steady-state gate when `DAKERA_TIERED=1`.
+   *
+   * A `remaining: 0` result means all vectors are at full ONNX quality.
+   */
+  async adminDrainReembed(request?: DrainReembedRequest): Promise<DrainReembedResponse> {
+    return this.request<DrainReembedResponse>('POST', '/admin/reembed/drain', request ?? {});
   }
 }
