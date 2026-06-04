@@ -2850,3 +2850,27 @@ export interface MigrateDimensionsResponse {
   already_current: number;
   results: NamespaceMigrationResult[];
 }
+
+/** Request body for POST /admin/reembed/drain (all fields optional, v0.11.82+) */
+export interface DrainReembedRequest {
+  /** Hard wall-clock cap in seconds (default 600). */
+  timeout_secs?: number;
+  /** Candidates upgraded per cycle (default 10000). */
+  batch_size?: number;
+  /** Min importance to upgrade (default 0.0 — upgrade all statics). */
+  min_importance?: number;
+}
+
+/** Response from POST /admin/reembed/drain (v0.11.82+) */
+export interface DrainReembedResponse {
+  /** Total vectors upgraded across all cycles. */
+  processed: number;
+  /** Static candidates still remaining (0 on a full drain). */
+  remaining: number;
+  /** Wall-clock duration of the drain in milliseconds. */
+  elapsed_ms: number;
+  /** Number of upgrade cycles executed. */
+  cycles: number;
+  /** True if the drain stopped on the timeout rather than reaching zero. */
+  timed_out: boolean;
+}

@@ -703,4 +703,59 @@ describe('Admin Methods', () => {
       expect(result.status).toBe('no_op');
     });
   });
+  // ---------------------------------------------------------------------------
+  // adminDrainReembed — POST /admin/reembed/drain (v0.11.82+, DAK-6326)
+  // ---------------------------------------------------------------------------
+
+  describe('adminDrainReembed', () => {
+    it('should drain all static vectors and parse the response', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        processed: 1280,
+        remaining: 0,
+        elapsed_ms: 4210,
+        cycles: 3,
+        timed_out: false,
+      }));
+
+      const result = await client.adminDrainReembed();
+
+      expect(result.processed).toBe(1280);
+      expect(result.remaining).toBe(0);
+      expect(result.cycles).toBe(3);
+      expect(result.timed_out).toBe(false);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/admin/reembed/drain');
+      expect(opts.method).toBe('POST');
+    });
+
+    it('should forward timeout_secs / batch_size / min_importance in the body', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        processed: 500,
+        remaining: 120,
+        elapsed_ms: 600000,
+        cycles: 50,
+        timed_out: true,
+      }));
+
+      const result = await client.adminDrainReembed({
+        timeout_secs: 600,
+        batch_size: 5000,
+        min_importance: 0.5,
+      });
+
+      expect(result.timed_out).toBe(true);
+      expect(result.remaining).toBe(120);
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body as string);
+      expect(body.timeout_secs).toBe(600);
+      expect(body.batch_size).toBe(5000);
+      expect(body.min_importance).toBe(0.5);
+    });
+
+    it('should throw on 403 (missing Admin scope)', async () => {
+      mockFetch.mockResolvedValueOnce(errorResponse(403, 'Admin scope required'));
+      await expect(client.adminDrainReembed()).rejects.toThrow('Admin scope required');
+    });
+  });
+
 });

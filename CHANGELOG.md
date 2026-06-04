@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.83] - 2026-06-04
+
+### Added
+
+- **`adminDrainReembed()`** — new `DakeraClient` method for `POST /admin/reembed/drain`
+  (v0.11.82+). Synchronously runs the re-embedding upgrade loop until all
+  `_embedding_kind=static` vectors are upgraded to full ONNX quality, or the optional
+  `timeout_secs` cap is reached. Accepts an optional `DrainReembedRequest` and returns a
+  `DrainReembedResponse` with `processed`, `remaining`, `elapsed_ms`, `cycles`, and
+  `timed_out` fields. Requires Admin scope. Useful as a pre-benchmark steady-state gate
+  when `DAKERA_TIERED=1`.
+- **`DrainReembedRequest` / `DrainReembedResponse`** — new types exported from the package.
+
+### Changed
+
+- **Server compatibility**: tracks Dakera server v0.11.76–v0.11.83.
+  - v0.11.76: `search_hybrid()` binary overselection formula corrected (Recall@10 restored).
+  - v0.11.77: `SearchMode` default flipped to `Hybrid`; `is_static` flag on write path.
+  - v0.11.78–v0.11.79: TieredEngine pre-warm; GPU inference semaphore; batch store via TieredEngine.
+  - v0.11.80: SIMD HNSW distance (3–8× throughput); ONNX memory fixes.
+  - v0.11.81: `OnnxBackend` GPU pool=1; BFCArena retry extended.
+  - v0.11.82: Model2Vec static-write tier (`DAKERA_TIERED=1`); `/health/ready` adds
+    `tiered_engine` field.
+  - v0.11.83: Deterministic HNSW (CE-127); raw-fs 9× writes; O(namespace) list removed.
+  No breaking changes to existing method signatures.
+
 ## [0.11.75] - 2026-05-31
 
 ### Changed
