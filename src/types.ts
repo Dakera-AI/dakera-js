@@ -214,6 +214,8 @@ export interface HealthResponse {
   status: string;
   version?: string;
   uptime?: number;
+  /** Git commit SHA baked into the binary at build time. Available since server v0.11.84. */
+  build_sha?: string;
 }
 
 /** Filter operators for metadata queries */
