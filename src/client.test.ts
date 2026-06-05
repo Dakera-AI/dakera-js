@@ -393,6 +393,31 @@ describe('DakeraClient', () => {
 
       expect(health.status).toBe('healthy');
     });
+
+    it('should include build_sha when server returns it (v0.11.84+)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ status: 'healthy', version: '0.11.84', build_sha: 'abc1234def5678' }),
+      });
+
+      const health = await client.health();
+
+      expect(health.status).toBe('healthy');
+      expect(health.build_sha).toBe('abc1234def5678');
+    });
+
+    it('should handle missing build_sha on older servers', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ status: 'healthy', version: '0.11.83' }),
+      });
+
+      const health = await client.health();
+
+      expect(health.build_sha).toBeUndefined();
+    });
   });
 
   describe('RetryConfig', () => {
