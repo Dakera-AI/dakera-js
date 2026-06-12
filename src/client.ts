@@ -149,7 +149,6 @@ import type {
   AgentFeedbackSummary,
   FeedbackHealthResponse,
   TifScore,
-  computeTifScore,
   CreateNamespaceKeyResponse,
   ListNamespaceKeysResponse,
   NamespaceKeyUsageResponse,
@@ -227,6 +226,7 @@ import type {
   DrainReembedRequest,
   DrainReembedResponse,
 } from './types';
+import { computeTifScore } from './types';
 
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_MAX_RETRIES = 3;
