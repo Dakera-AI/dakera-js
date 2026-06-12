@@ -148,6 +148,8 @@ import type {
   FeedbackHistoryResponse,
   AgentFeedbackSummary,
   FeedbackHealthResponse,
+  TifScore,
+  computeTifScore,
   CreateNamespaceKeyResponse,
   ListNamespaceKeysResponse,
   NamespaceKeyUsageResponse,
@@ -1649,6 +1651,20 @@ export class DakeraClient {
    */
   async getMemoryFeedbackHistory(memoryId: string): Promise<FeedbackHistoryResponse> {
     return this.request<FeedbackHistoryResponse>('GET', `/v1/memories/${memoryId}/feedback`);
+  }
+
+  /**
+   * Compute a T-I-F reliability score for a memory (T-I-F RFC Phase 3).
+   *
+   * Fetches the memory's full feedback history and reduces it to a
+   * {@link TifScore} with truth/indeterminacy/falsity proportions and a
+   * human-readable {@link TifScore.classification}.
+   *
+   * @param memoryId  The memory to score.
+   */
+  async evaluateTif(memoryId: string): Promise<TifScore> {
+    const history = await this.getMemoryFeedbackHistory(memoryId);
+    return computeTifScore(history);
   }
 
   /**

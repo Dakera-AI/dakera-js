@@ -2876,3 +2876,84 @@ export interface DrainReembedResponse {
   /** True if the drain stopped on the timeout rather than reaching zero. */
   timed_out: boolean;
 }
+
+// =============================================================================
+// T-I-F Reliability Scoring (Phase 3 T-I-F RFC)
+// =============================================================================
+
+/** Classification labels from a TifScore. */
+export type TifClassification =
+  | 'surface_contradiction'
+  | 'ask_clarification'
+  | 'confident_reuse'
+  | 'verify_before_use';
+
+/**
+ * Truth-Indeterminacy-Falsity reliability score for a memory (T-I-F RFC Phase 3).
+ *
+ * All three proportions (truth / indeterminacy / falsity) sum to 1.0.
+ * Build via {@link computeTifScore} from a {@link FeedbackHistoryResponse}, or
+ * deserialise from stored metadata with {@link tifScoreFromMetadata}.
+ */
+export interface TifScore {
+  /** Proportion of positive feedback signals (upvote / positive). */
+  truth: number;
+  /** Proportion of uncertainty signals (flag). */
+  indeterminacy: number;
+  /** Proportion of negative feedback signals (downvote / negative). */
+  falsity: number;
+  /** Total feedback events used to compute this score. */
+  feedbackCount: number;
+  /** Human-readable reliability classification derived from the proportions. */
+  classification: TifClassification;
+}
+
+function classifyTif(truth: number, indeterminacy: number, falsity: number): TifClassification {
+  if (falsity >= 0.5) return 'surface_contradiction';
+  if (indeterminacy >= 0.5) return 'ask_clarification';
+  if (truth >= 0.7) return 'confident_reuse';
+  return 'verify_before_use';
+}
+
+/**
+ * Compute a {@link TifScore} from a memory's {@link FeedbackHistoryResponse}.
+ *
+ * Signals bucketed as:
+ * - `upvote` / `positive`   → truth
+ * - `downvote` / `negative` → falsity
+ * - `flag`                  → indeterminacy
+ *
+ * When there is no feedback the score is
+ * `{ truth: 0, indeterminacy: 1, falsity: 0, feedbackCount: 0 }`.
+ */
+export function computeTifScore(history: FeedbackHistoryResponse): TifScore {
+  let upvotes = 0;
+  let downvotes = 0;
+  let flags = 0;
+  for (const entry of history.entries) {
+    if (entry.signal === 'upvote' || entry.signal === 'positive') upvotes++;
+    else if (entry.signal === 'downvote' || entry.signal === 'negative') downvotes++;
+    else if (entry.signal === 'flag') flags++;
+  }
+  const total = upvotes + downvotes + flags;
+  if (total === 0) {
+    return { truth: 0, indeterminacy: 1, falsity: 0, feedbackCount: 0, classification: 'ask_clarification' };
+  }
+  const truth = upvotes / total;
+  const indeterminacy = flags / total;
+  const falsity = downvotes / total;
+  return { truth, indeterminacy, falsity, feedbackCount: total, classification: classifyTif(truth, indeterminacy, falsity) };
+}
+
+/**
+ * Deserialise a {@link TifScore} from a `metadata.reliability` object.
+ *
+ * Expected keys: `truth`, `indeterminacy`, `falsity`, `feedback_count` (snake_case as stored).
+ */
+export function tifScoreFromMetadata(data: Record<string, unknown>): TifScore {
+  const truth = Number(data['truth'] ?? 0);
+  const indeterminacy = Number(data['indeterminacy'] ?? 0);
+  const falsity = Number(data['falsity'] ?? 0);
+  const feedbackCount = Number(data['feedback_count'] ?? 0);
+  return { truth, indeterminacy, falsity, feedbackCount, classification: classifyTif(truth, indeterminacy, falsity) };
+}
