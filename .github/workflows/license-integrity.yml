@@ -1,0 +1,59 @@
+# NOTE: Out-of-network repos that removed fork relationship are not detectable via GitHub API.
+name: License Integrity Monitor
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-forks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute LICENSE hash
+        id: ref-hash
+        run: |
+          HASH=$(sha256sum LICENSE | awk '{print $1}')
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Check fork LICENSE integrity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_HASH: ${{ steps.ref-hash.outputs.hash }}
+        run: |
+          VIOLATIONS=""
+          PAGE=1
+          while true; do
+            FORKS=$(gh api "/repos/dakera-ai/dakera-js/forks?per_page=100&page=${PAGE}" --jq '.[].full_name')
+            if [ -z "$FORKS" ]; then
+              break
+            fi
+            while IFS= read -r FORK; do
+              CONTENT=$(gh api "/repos/${FORK}/contents/LICENSE" --jq '.content' 2>/dev/null || true)
+              if [ -z "$CONTENT" ]; then
+                VIOLATIONS="${VIOLATIONS}\n- ${FORK}: LICENSE file missing or inaccessible"
+              else
+                FORK_HASH=$(echo "$CONTENT" | base64 -d 2>/dev/null | sha256sum | awk '{print $1}')
+                if [ "$FORK_HASH" != "$REF_HASH" ]; then
+                  VIOLATIONS="${VIOLATIONS}\n- ${FORK}: LICENSE hash mismatch (expected ${REF_HASH}, got ${FORK_HASH})"
+                fi
+              fi
+              sleep 0.5
+            done <<< "$FORKS"
+            PAGE=$((PAGE + 1))
+          done
+
+          if [ -n "$VIOLATIONS" ]; then
+            BODY="The following forks have a LICENSE integrity violation:\n${VIOLATIONS}\n\nRef hash: ${REF_HASH}"
+            gh issue create \
+              --repo dakera-ai/dakera-js \
+              --title "License integrity violation detected" \
+              --body "$(printf '%b' "$BODY")"
+          fi
