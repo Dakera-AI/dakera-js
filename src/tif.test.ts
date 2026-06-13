@@ -36,11 +36,11 @@ describe('computeTifScore', () => {
     expect(score.feedbackCount).toBe(3);
   });
 
-  it('returns falsity=1 for all downvotes', () => {
+  it('returns falsity=0.8 for two downvotes (thin evidence)', () => {
     const score = computeTifScore(makeHistory('downvote', 'downvote'));
     expect(score.truth).toBe(0);
-    expect(score.falsity).toBe(1);
-    expect(score.indeterminacy).toBe(0);
+    expect(score.falsity).toBeCloseTo(0.8);
+    expect(score.indeterminacy).toBeCloseTo(0.2);
     expect(score.feedbackCount).toBe(2);
   });
 
@@ -109,6 +109,96 @@ describe('TifScore.classification', () => {
     // Actually 3 downvotes + 3 flags → falsity=0.5, indeterminacy=0.5
     const score = computeTifScore(makeHistory('downvote', 'downvote', 'downvote', 'flag', 'flag', 'flag'));
     expect(score.classification).toBe('surface_contradiction');
+  });
+});
+
+describe('thin evidence', () => {
+  it('single upvote is not confident_reuse', () => {
+    const s = computeTifScore(makeHistory('upvote'));
+    expect(s.truth + s.indeterminacy + s.falsity).toBeCloseTo(1.0);
+    expect(s.indeterminacy).toBeGreaterThan(0);
+    expect(s.truth).toBeLessThan(0.70);
+    expect(s.classification).toBe('verify_before_use');
+  });
+
+  it('two upvotes reach confident_reuse', () => {
+    const s = computeTifScore(makeHistory('upvote', 'upvote'));
+    expect(s.truth).toBeCloseTo(0.8);
+    expect(s.indeterminacy).toBeCloseTo(0.2);
+    expect(s.classification).toBe('confident_reuse');
+  });
+
+  it('three upvotes have no base indeterminacy', () => {
+    const s = computeTifScore(makeHistory('upvote', 'upvote', 'upvote'));
+    expect(s.truth).toBeCloseTo(1.0);
+    expect(s.indeterminacy).toBeCloseTo(0.0);
+    expect(s.classification).toBe('confident_reuse');
+  });
+});
+
+describe('golden vectors (canonical T-I-F v1 contract)', () => {
+  it('no feedback', () => {
+    const s = computeTifScore(makeHistory());
+    expect(s.truth).toBeCloseTo(0.0);
+    expect(s.indeterminacy).toBeCloseTo(1.0);
+    expect(s.falsity).toBeCloseTo(0.0);
+    expect(s.classification).toBe('ask_clarification');
+  });
+
+  it('one upvote', () => {
+    const s = computeTifScore(makeHistory('upvote'));
+    expect(s.truth).toBeCloseTo(2 / 3, 4);
+    expect(s.indeterminacy).toBeCloseTo(1 / 3, 4);
+    expect(s.falsity).toBeCloseTo(0.0);
+    expect(s.classification).toBe('verify_before_use');
+  });
+
+  it('two upvotes', () => {
+    const s = computeTifScore(makeHistory('upvote', 'upvote'));
+    expect(s.truth).toBeCloseTo(0.8);
+    expect(s.indeterminacy).toBeCloseTo(0.2);
+    expect(s.falsity).toBeCloseTo(0.0);
+    expect(s.classification).toBe('confident_reuse');
+  });
+
+  it('three upvotes', () => {
+    const s = computeTifScore(makeHistory('upvote', 'upvote', 'upvote'));
+    expect(s.truth).toBeCloseTo(1.0);
+    expect(s.indeterminacy).toBeCloseTo(0.0);
+    expect(s.falsity).toBeCloseTo(0.0);
+    expect(s.classification).toBe('confident_reuse');
+  });
+
+  it('two downvotes', () => {
+    const s = computeTifScore(makeHistory('downvote', 'downvote'));
+    expect(s.truth).toBeCloseTo(0.0);
+    expect(s.indeterminacy).toBeCloseTo(0.2);
+    expect(s.falsity).toBeCloseTo(0.8);
+    expect(s.classification).toBe('surface_contradiction');
+  });
+
+  it('two flags', () => {
+    const s = computeTifScore(makeHistory('flag', 'flag'));
+    expect(s.truth).toBeCloseTo(0.0);
+    expect(s.indeterminacy).toBeCloseTo(1.0);
+    expect(s.falsity).toBeCloseTo(0.0);
+    expect(s.classification).toBe('ask_clarification');
+  });
+
+  it('8 upvotes, 1 downvote, 1 flag', () => {
+    const s = computeTifScore(makeHistory('upvote', 'upvote', 'upvote', 'upvote', 'upvote', 'upvote', 'upvote', 'upvote', 'downvote', 'flag'));
+    expect(s.truth).toBeCloseTo(0.8);
+    expect(s.indeterminacy).toBeCloseTo(0.1);
+    expect(s.falsity).toBeCloseTo(0.1);
+    expect(s.classification).toBe('confident_reuse');
+  });
+
+  it('3 downvotes, 3 flags', () => {
+    const s = computeTifScore(makeHistory('downvote', 'downvote', 'downvote', 'flag', 'flag', 'flag'));
+    expect(s.truth).toBeCloseTo(0.0);
+    expect(s.indeterminacy).toBeCloseTo(0.5);
+    expect(s.falsity).toBeCloseTo(0.5);
+    expect(s.classification).toBe('surface_contradiction');
   });
 });
 

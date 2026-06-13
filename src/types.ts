@@ -2939,9 +2939,14 @@ export function computeTifScore(history: FeedbackHistoryResponse): TifScore {
   if (total === 0) {
     return { truth: 0, indeterminacy: 1, falsity: 0, feedbackCount: 0, classification: 'ask_clarification' };
   }
-  const truth = upvotes / total;
-  const indeterminacy = flags / total;
-  const falsity = downvotes / total;
+  const baseIndeterminacy = total < 3 ? (3 - total) * 0.25 : 0;
+  let truth = upvotes / total;
+  let falsity = downvotes / total;
+  let indeterminacy = flags / total + baseIndeterminacy;
+  const sum = truth + falsity + indeterminacy;
+  truth /= sum;
+  falsity /= sum;
+  indeterminacy /= sum;
   return { truth, indeterminacy, falsity, feedbackCount: total, classification: classifyTif(truth, indeterminacy, falsity) };
 }
 
