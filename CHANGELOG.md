@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`TifScore`** — new interface and class in `src/types.ts` for Truth-Indeterminacy-Falsity
+  reliability scoring (T-I-F RFC Phase 3). Fields: `truth`, `indeterminacy`, `falsity`
+  (all `number`, 0–1), `feedbackCount` (`number`). Read-only getter `classification`
+  returns `"confident_reuse"`, `"ask_clarification"`, `"surface_contradiction"`, or
+  `"verify_before_use"`.
+  - `computeTifScore(history: FeedbackHistoryResponse): TifScore` — standalone function
+    to compute T-I-F from a feedback history response.
+  - `TifScore.fromMetadata(data: Record<string, unknown>): TifScore` — parse a
+    `metadata.reliability` dict stored by T-I-F Phase 1/2 scripts.
+- **`DakeraClient.evaluateTif(memoryId: string): Promise<TifScore>`** — convenience
+  method that fetches feedback history and returns a typed `TifScore` in one call.
+
 ## [0.11.89] - 2026-06-11
 
 ### Changed

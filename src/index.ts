@@ -231,6 +231,11 @@ export type {
   FeedbackHistoryResponse,
   AgentFeedbackSummary,
   FeedbackHealthResponse,
+  // T-I-F Reliability (T-I-F RFC Phase 3)
+  TifScore,
+  TifClassification,
+  computeTifScore,
+  tifScoreFromMetadata,
   // Namespace API Keys (SEC-1)
   NamespaceKeyInfo,
   CreateNamespaceKeyResponse,

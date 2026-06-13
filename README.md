@@ -127,6 +127,7 @@ for await (const event of stream) {
 - **Text Auto-Embedding** — server-side embedding generation (no local model needed)
 - **Namespaces** — isolated vector stores per project, tenant, or use case
 - **Feedback Loop** — upvote/downvote/flag memories to improve recall quality
+- **T-I-F Reliability** — `TifScore` type and `evaluateTif()` for Truth-Indeterminacy-Falsity scoring of memory reliability
 - **Entity Extraction** — GLiNER NER for automatic entity detection
 - **SSE Streaming** — async generator event subscriptions, browser-compatible
 - **Branded Types** — `VectorId`, `AgentId`, `MemoryId`, `SessionId` for compile-time safety
