@@ -71,6 +71,14 @@ Works with **Node.js** (20+), **Deno**, **Bun**, **Cloudflare Workers**, and mod
 
 ```typescript
 import { DakeraClient } from '@dakera-ai/dakera';
+const client = new DakeraClient({ baseUrl: 'http://localhost:3000', apiKey: 'dk-mykey' });
+await client.storeMemory('my-agent', { content: 'User prefers brevity', importance: 0.9 });
+```
+
+Full example — store, recall, upsert, and hybrid search:
+
+```typescript
+import { DakeraClient } from '@dakera-ai/dakera';
 
 const client = new DakeraClient({
   baseUrl: 'http://localhost:3000',
