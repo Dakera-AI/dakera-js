@@ -21,6 +21,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DakeraClient.evaluateTif(memoryId: string): Promise<TifScore>`** — convenience
   method that fetches feedback history and returns a typed `TifScore` in one call.
 
+## [0.11.91] - 2026-06-14
+
+### Security
+
+- **esbuild dependency upgraded** — resolves
+  [GHSA-gv7w-rqvm-qjhr](https://github.com/advisories/GHSA-gv7w-rqvm-qjhr). The
+  build-time `esbuild` transitive dependency was pinned to a vulnerable version; bumped
+  to the patched release. No runtime behaviour changes.
+
+## [0.11.90] - 2026-06-14
+
+### Added
+
+- **`hybridSearch(namespace, query, opts?): Promise<HybridSearchResult[]>`** — BM25
+  full-text + HNSW vector similarity search in a single call. Pass a `query` string for
+  server-side ONNX auto-embedding, or supply a `Float32Array` `vector` for manual
+  re-ranking. The `alpha` option (0–1) blends BM25 and vector scores.
+  (API: `POST /namespaces/{ns}/search/hybrid`)
+- **`batchRecall(request: BatchRecallRequest): Promise<BatchRecallResponse>`** —
+  filter-based memory listing by agent, tags, importance range, time window, or session
+  id. Returns paginated results without needing a query string. Typed interfaces
+  `BatchRecallRequest` and `BatchRecallResponse` exported from the package.
+  (API: `POST /recall/batch`)
+- **`storeMemoriesBatch(request: BatchStoreMemoryRequest): Promise<BatchStoreMemoryResponse>`**
+  — batch ingest of multiple memory records in one HTTP request. Response contains
+  `stored`, `failed`, and per-item `errors`. (API: `POST /memories/batch`)
+- **`autopilotStatus(): Promise<AutoPilotStatusResponse>`**,
+  **`autopilotUpdateConfig(request: AutoPilotConfigRequest): Promise<AutoPilotConfigResponse>`**,
+  **`autopilotTrigger(action: AutoPilotTriggerAction): Promise<AutoPilotTriggerResponse>`**
+  — read and control the server's Autopilot dedup/consolidation engine. All typed
+  interfaces exported from the package. (API: `GET/POST /admin/autopilot/*`)
+- **`decayConfig(): Promise<DecayConfigResponse>`**,
+  **`decayUpdateConfig(request: DecayConfigUpdateRequest): Promise<DecayConfigUpdateResponse>`**,
+  **`decayStats(): Promise<DecayStatsResponse>`** — introspect and tune the decay engine
+  at runtime. All typed interfaces exported from the package.
+  (API: `GET/POST /admin/decay/*`)
+
+### Documentation
+
+- **Quickstart README overhaul** — added a minimal 3-line quickstart at the top of the
+  README so new users can reach their first memory store/recall in under 60 seconds.
+
 ## [0.11.89] - 2026-06-11
 
 ### Changed
