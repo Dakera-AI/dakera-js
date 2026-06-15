@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DakeraClient.evaluateTif(memoryId: string): Promise<TifScore>`** — convenience
   method that fetches feedback history and returns a typed `TifScore` in one call.
 
+## [0.11.92] - 2026-06-14
+
+### Documentation
+
+- **CHANGELOG.md expanded** — complete feature descriptions added for v0.11.90 (batch
+  recall, hybrid search, batch store, autopilot/decay APIs, TIF helpers, ORCID) and
+  v0.11.91 (esbuild security fix). Previously only commit one-liners were present.
+  ([#151](https://github.com/Dakera-AI/dakera-js/pull/151))
+
+### CI
+
+- **`actions/checkout` 4 → 6** — CI workflow dependency upgrade
+  ([#152](https://github.com/Dakera-AI/dakera-js/pull/152)). No runtime changes.
+
 ## [0.11.91] - 2026-06-14
 
 ### Security
