@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`adminReembedStaticCount()`** — new `DakeraClient` method for
+  `GET /v1/admin/reembed/static-count` (v0.11.91+, DAK-6781). Returns a
+  `StaticCountResponse` with `static_count` — the number of static vectors
+  pending ONNX upgrade. A value of 0 means steady state.
+
 - **`TifScore`** — new interface and class in `src/types.ts` for Truth-Indeterminacy-Falsity
   reliability scoring (T-I-F RFC Phase 3). Fields: `truth`, `indeterminacy`, `falsity`
   (all `number`, 0–1), `feedbackCount` (`number`). Read-only getter `classification`

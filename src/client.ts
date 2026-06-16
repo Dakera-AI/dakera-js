@@ -225,6 +225,7 @@ import type {
   MigrateDimensionsResponse,
   DrainReembedRequest,
   DrainReembedResponse,
+  StaticCountResponse,
 } from './types';
 import { computeTifScore } from './types';
 
@@ -3211,5 +3212,16 @@ export class DakeraClient {
    */
   async adminDrainReembed(request?: DrainReembedRequest): Promise<DrainReembedResponse> {
     return this.request<DrainReembedResponse>('POST', '/admin/reembed/drain', request ?? {});
+  }
+
+  /**
+   * GET /admin/reembed/static-count — count of static vectors pending re-embedding (v0.11.91+).
+   *
+   * Returns the number of `_embedding_kind=static` vectors awaiting ONNX upgrade.
+   * Poll alongside `adminDrainReembed` to monitor drain progress. A `static_count`
+   * of 0 means steady state. Requires Admin scope.
+   */
+  async adminReembedStaticCount(): Promise<StaticCountResponse> {
+    return this.request<StaticCountResponse>('GET', '/admin/reembed/static-count');
   }
 }

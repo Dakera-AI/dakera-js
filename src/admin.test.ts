@@ -758,4 +758,34 @@ describe('Admin Methods', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // adminReembedStaticCount — GET /admin/reembed/static-count (v0.11.91+, DAK-6781)
+  // ---------------------------------------------------------------------------
+
+  describe('adminReembedStaticCount', () => {
+    it('should return static_count from the server', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ static_count: 42 }));
+
+      const result = await client.adminReembedStaticCount();
+
+      expect(result.static_count).toBe(42);
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/admin/reembed/static-count');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('should return 0 when steady state (no statics pending)', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ static_count: 0 }));
+
+      const result = await client.adminReembedStaticCount();
+
+      expect(result.static_count).toBe(0);
+    });
+
+    it('should throw on 403 (missing Admin scope)', async () => {
+      mockFetch.mockResolvedValueOnce(errorResponse(403, 'Admin scope required'));
+      await expect(client.adminReembedStaticCount()).rejects.toThrow('Admin scope required');
+    });
+  });
+
 });
