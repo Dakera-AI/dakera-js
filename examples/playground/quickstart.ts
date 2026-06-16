@@ -81,12 +81,19 @@ async function main() {
 
   // -------------------------------------------------------------------------
   // 4. Knowledge graph link
+  // Note: requires a full Dakera account; not available on the public sandbox.
   // -------------------------------------------------------------------------
   console.log('\n--- 4. Knowledge Graph Link ---');
 
-  const link = await client.memoryLink(mem1.memory.id, mem2.memory.id, 'related_to');
-  console.log(`Linked ${mem1.memory.id} → ${mem2.memory.id}`);
-  console.log(`  Edge: ${link.edge?.edge_type ?? 'created'}`);
+  try {
+    const link = await client.memoryLink(mem1.memory.id, mem2.memory.id, 'related_to');
+    console.log(`Linked ${mem1.memory.id} → ${mem2.memory.id}`);
+    console.log(`  Edge: ${link.edge?.edge_type ?? 'created'}`);
+  } catch (kgErr: unknown) {
+    const msg = kgErr instanceof Error ? kgErr.message : String(kgErr);
+    console.log(`KG link not available in sandbox: ${msg}`);
+    console.log('  Sign up at https://dakera.ai for full knowledge graph access.');
+  }
 
   console.log('\nPlayground quickstart complete! Visit https://dakera.ai to learn more.');
 }
