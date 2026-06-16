@@ -525,6 +525,8 @@ export interface StoreMemoryRequest {
   expires_at?: number;
   /** Associated session ID */
   session_id?: string;
+  /** Optional tags to associate with the memory */
+  tags?: string[];
   /** Pre-computed embedding */
   embedding?: number[];
 }

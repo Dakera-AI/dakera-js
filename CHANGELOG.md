@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.96] - 2026-06-16
+
+### Added
+
+- **`ChatMemorySession`** — new convenience helper class for the LLM chat
+  comparison pattern used by the playground (DAK-6846,
+  [#172](https://github.com/Dakera-AI/dakera-js/pull/172)). Wraps
+  `startSession` / `storeMemory` / `recall` / `endSession` into a
+  clean async API:
+
+  ```typescript
+  import { DakeraClient, ChatMemorySession } from '@dakera-ai/dakera';
+
+  const client = new DakeraClient({ baseUrl: url, apiKey: key });
+
+  const session = await ChatMemorySession.create(client, 'my-agent');
+  try {
+    await session.store('user', 'My name is Alice.');
+    const context = await session.recall('who am I', { topK: 5 });
+    // pass context to your LLM — or omit for the baseline arm
+  } finally {
+    await session.close();
+  }
+  ```
+
+  Key methods: `ChatMemorySession.create()`, `.store()`, `.recall()`,
+  `.close()`. Properties: `.sessionId`, `.agentId`. Also exported:
+  `StoreOptions`, `RecallOptions` interfaces.
+
+- **Playground chat comparison example** —
+  `examples/playground/chat_comparison.ts` shows the full side-by-side
+  pattern: seed turns, open a comparison session, recall context, call an
+  LLM with and without memory, and display a diff.
+
 ## [0.11.95] - 2026-06-16
 
 ### Fixed

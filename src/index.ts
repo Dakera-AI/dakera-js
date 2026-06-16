@@ -24,6 +24,10 @@
 // Client
 export { DakeraClient } from './client';
 
+// Session helpers
+export { ChatMemorySession } from './session';
+export type { StoreOptions, RecallOptions } from './session';
+
 // Branded ID types and factory helpers
 export type { VectorId, AgentId, MemoryId, SessionId, Branded } from './types';
 export { vectorId, agentId, memoryId, sessionId } from './types';
