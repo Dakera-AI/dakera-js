@@ -14,7 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TealTiger subpath export** — `import { DakeraCostStorage } from '@dakera-ai/dakera/integrations/tealtiger'`
   now resolves correctly. Added `./integrations/tealtiger` to `package.json` exports and updated
   the build script to bundle `src/integrations/tealtiger.ts` as a separate entry point, producing
-  `dist/integrations/tealtiger.{js,mjs,d.ts}`. (DAK-6819)
+  `dist/integrations/tealtiger.{js,mjs,d.ts}`. (DAK-6819,
+  [#170](https://github.com/Dakera-AI/dakera-js/pull/170))
+
+## [0.11.94] - 2026-06-16
+
+### Added
+
+- **TealTiger governance middleware** — new `@dakera-ai/dakera/integrations/tealtiger`
+  subpath exports three adapter classes for the [TealTiger](https://github.com/agentguard-ai/tealtiger)
+  governance framework: (DAK-6701, [#157](https://github.com/Dakera-AI/dakera-js/pull/157))
+  - `DakeraCostStorage` — implements `CostStorage` ABC; persists cost records as
+    Dakera memories with importance tiered by severity (BLOCK=0.95, WARN=0.85, LOG=0.7).
+  - `DakeraDecisionStore` — persists governance decision receipts for audit trail.
+  - `DakeraDelegationHelper` — stores delegation chains as knowledge-graph edges
+    (`delegated_from` edge type), enabling traversal of agent authority hierarchies.
+  - `DakeraGovernanceEventWriter` — implements `GovernanceEventWriter` interface
+    (`initialize`, `writeBatch`, `close`) for streaming governance events into Dakera memory.
+
+  Install with: `npm install @dakera-ai/dakera tealtiger`
 
 ## [0.11.93] - 2026-06-16
 
