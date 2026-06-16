@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.95] - 2026-06-16
+
+### Fixed
+
+- **TealTiger subpath export** — `import { DakeraCostStorage } from '@dakera-ai/dakera/integrations/tealtiger'`
+  now resolves correctly. Added `./integrations/tealtiger` to `package.json` exports and updated
+  the build script to bundle `src/integrations/tealtiger.ts` as a separate entry point, producing
+  `dist/integrations/tealtiger.{js,mjs,d.ts}`. (DAK-6819)
+
 ## [0.11.93] - 2026-06-16
 
 ### Added
