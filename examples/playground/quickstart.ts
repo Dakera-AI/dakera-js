@@ -10,7 +10,7 @@
 
 import { DakeraClient } from '@dakera-ai/dakera';
 
-const PLAYGROUND_URL = process.env.DAKERA_API_URL ?? 'http://5.75.177.31';
+const PLAYGROUND_URL = process.env.DAKERA_API_URL ?? 'https://5-75-177-31.sslip.io';
 const PLAYGROUND_KEY = process.env.DAKERA_API_KEY ?? 'playground-demo';
 const AGENT_ID = 'playground-agent';
 
