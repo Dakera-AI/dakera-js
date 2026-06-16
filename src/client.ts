@@ -2125,14 +2125,15 @@ export class DakeraClient {
     return this.request<{ status: string }>('POST', `/v1/admin/namespaces/${namespace}/optimize`);
   }
 
-  /** Get index stats for a namespace */
-  async adminIndexStats(namespace: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', `/v1/admin/namespaces/${namespace}/index/stats`);
+  /** Get index statistics across all namespaces */
+  async adminIndexStats(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/v1/admin/indexes/stats');
   }
 
-  /** Rebuild indexes for a namespace */
-  async rebuildIndexes(namespace: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/admin/namespaces/${namespace}/index/rebuild`);
+  /** Rebuild indexes, optionally for a specific namespace */
+  async rebuildIndexes(namespace?: string): Promise<{ status: string }> {
+    const body = namespace ? { namespace } : undefined;
+    return this.request<{ status: string }>('POST', '/v1/admin/indexes/rebuild', body);
   }
 
   /** Get cache statistics */
@@ -2187,7 +2188,7 @@ export class DakeraClient {
 
   /** Restore a backup */
   async restoreBackup(backupId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/admin/backups/${backupId}/restore`);
+    return this.request<{ status: string }>('POST', '/v1/admin/backups/restore', { backup_id: backupId });
   }
 
   /** Delete a backup */
