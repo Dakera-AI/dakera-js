@@ -2877,6 +2877,12 @@ export interface DrainReembedResponse {
   timed_out: boolean;
 }
 
+/** Response from GET /admin/reembed/static-count (v0.11.91+) */
+export interface StaticCountResponse {
+  /** Number of static vectors pending re-embedding. 0 means steady state. */
+  static_count: number;
+}
+
 // =============================================================================
 // T-I-F Reliability Scoring (Phase 3 T-I-F RFC)
 // =============================================================================
