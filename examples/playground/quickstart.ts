@@ -8,6 +8,7 @@
  *   npx tsx examples/playground/quickstart.ts
  */
 
+import { randomBytes } from 'crypto';
 import { DakeraClient } from '@dakera-ai/dakera';
 
 const PLAYGROUND_URL = process.env.DAKERA_API_URL ?? 'https://5-75-177-31.sslip.io';
@@ -15,9 +16,14 @@ const PLAYGROUND_KEY = process.env.DAKERA_API_KEY ?? 'playground-demo';
 const AGENT_ID = 'playground-agent';
 
 async function main() {
+  // Generate a unique session ID so the sandbox proxy can isolate this run's
+  // memories from other concurrent playground sessions (DAK-6806).
+  const sessionId = `pg_${randomBytes(12).toString('hex')}`;
+
   const client = new DakeraClient({
     baseUrl: PLAYGROUND_URL,
     apiKey: PLAYGROUND_KEY,
+    headers: { 'X-Playground-Session': sessionId },
   });
 
   const health = await client.health();
