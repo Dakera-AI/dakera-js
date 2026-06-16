@@ -349,3 +349,11 @@ export {
   AuthorizationError,
   TimeoutError,
 } from './errors';
+
+// Integrations
+export {
+  DakeraCostStorage,
+  DakeraDecisionStore,
+  DakeraDelegationHelper,
+} from './integrations/tealtiger';
+export type { CostSummary } from './integrations/tealtiger';
