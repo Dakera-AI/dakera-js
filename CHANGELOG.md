@@ -7,24 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.93] - 2026-06-16
+
 ### Added
 
 - **`adminReembedStaticCount()`** — new `DakeraClient` method for
-  `GET /v1/admin/reembed/static-count` (v0.11.91+, DAK-6781). Returns a
-  `StaticCountResponse` with `static_count` — the number of static vectors
-  pending ONNX upgrade. A value of 0 means steady state.
+  `GET /v1/admin/reembed/static-count` (DAK-6781,
+  [#166](https://github.com/Dakera-AI/dakera-js/pull/166)). Returns a
+  `StaticCountResponse` with `static_count` — count of static vectors pending ONNX
+  upgrade. A value of 0 means steady state.
 
-- **`TifScore`** — new interface and class in `src/types.ts` for Truth-Indeterminacy-Falsity
-  reliability scoring (T-I-F RFC Phase 3). Fields: `truth`, `indeterminacy`, `falsity`
-  (all `number`, 0–1), `feedbackCount` (`number`). Read-only getter `classification`
-  returns `"confident_reuse"`, `"ask_clarification"`, `"surface_contradiction"`, or
-  `"verify_before_use"`.
-  - `computeTifScore(history: FeedbackHistoryResponse): TifScore` — standalone function
-    to compute T-I-F from a feedback history response.
-  - `TifScore.fromMetadata(data: Record<string, unknown>): TifScore` — parse a
-    `metadata.reliability` dict stored by T-I-F Phase 1/2 scripts.
-- **`DakeraClient.evaluateTif(memoryId: string): Promise<TifScore>`** — convenience
-  method that fetches feedback history and returns a typed `TifScore` in one call.
+- **Playground quickstart** — `examples/playground/quickstart.ts` demonstrates store,
+  recall, search, and knowledge-graph link against the public sandbox. (DAK-6737,
+  [#161](https://github.com/Dakera-AI/dakera-js/pull/161))
+
+### Fixed
+
+- **Admin URL corrections** — `adminIndexStats()`, `rebuildIndexes()`, and
+  `restoreBackup()` used incorrect URL patterns causing 404s. (DAK-6775,
+  [#165](https://github.com/Dakera-AI/dakera-js/pull/165))
+
+- **Playground HTTPS endpoint** — quickstart now uses
+  `https://5-75-177-31.sslip.io` (valid TLS) instead of bare HTTP IP. (DAK-6743,
+  [#162](https://github.com/Dakera-AI/dakera-js/pull/162))
+
+- **Sandbox KG-link restriction** — knowledge-graph link step now handles 403
+  from the sandbox gracefully instead of throwing. (DAK-6749,
+  [#163](https://github.com/Dakera-AI/dakera-js/pull/163))
+
+### Testing
+
+- **Playground integration tests** — `src/playground_integration.test.ts` added;
+  covers store, recall, search, and KG-link (graceful). Tests skip automatically
+  when `DAKERA_TEST_URL` is absent.
+  ([#164](https://github.com/Dakera-AI/dakera-js/pull/164))
 
 ## [0.11.92] - 2026-06-14
 
