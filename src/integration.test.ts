@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { DakeraClient } from "./client";
 import { AuthenticationError } from "./errors";
+import { ChatMemorySession } from "./session";
 
 const DAKERA_URL = process.env.DAKERA_TEST_URL || "http://localhost:3000";
 const TEST_NAMESPACE = `integ-${crypto.randomUUID().slice(0, 8)}`;
@@ -148,13 +149,42 @@ describeIntegration("Memory CRUD", () => {
   });
 });
 
-describeIntegration("Sessions", () => {
-  it("starts and ends a session", async () => {
-    const session = await client.storeMemory(TEST_AGENT, {
-      content: "session test placeholder",
-      importance: 0.5,
-    });
-    expect(session).toBeDefined();
+describeIntegration("Sessions / ChatMemorySession", () => {
+  it("full round-trip: create → store → recall → close", async () => {
+    const agentId = `integ-session-${crypto.randomUUID().slice(0, 8)}`;
+    const session = await ChatMemorySession.create(client, agentId);
+    expect(session.sessionId).toBeTruthy();
+    expect(session.agentId).toBe(agentId);
+
+    // Store two conversation turns
+    const r1 = await session.store("user", "My favourite colour is cobalt blue.");
+    expect(r1).toBeDefined();
+
+    const r2 = await session.store("assistant", "Noted — cobalt blue is vivid.", { importance: 0.5 });
+    expect(r2).toBeDefined();
+
+    // Allow indexing
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Recall should surface relevant memories
+    const memories = await session.recall("favourite colour");
+    expect(Array.isArray(memories)).toBe(true);
+    expect(memories.length).toBeGreaterThan(0);
+
+    // Close session cleanly
+    await session.close();
+  });
+
+  it("async context-manager pattern (try/finally)", async () => {
+    const agentId = `integ-ctx-${crypto.randomUUID().slice(0, 8)}`;
+    const session = await ChatMemorySession.create(client, agentId);
+    try {
+      await session.store("user", "Testing the session context pattern.");
+      const memories = await session.recall("session context");
+      expect(Array.isArray(memories)).toBe(true);
+    } finally {
+      await session.close();
+    }
   });
 });
 
