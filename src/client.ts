@@ -2930,7 +2930,7 @@ export class DakeraClient {
    */
   async adminFulltextReindex(namespace?: string): Promise<FulltextReindexResponse> {
     const body = namespace ? { namespace } : {};
-    return this.request<FulltextReindexResponse>('POST', '/admin/fulltext/reindex', body);
+    return this.request<FulltextReindexResponse>('POST', '/v1/admin/fulltext/reindex', body);
   }
 
   // ---------------------------------------------------------------------------
@@ -2939,32 +2939,32 @@ export class DakeraClient {
 
   /** GET /admin/cluster/replication — cluster replication status. */
   async adminClusterReplication(): Promise<ReplicationStatus> {
-    return this.request<ReplicationStatus>('GET', '/admin/cluster/replication');
+    return this.request<ReplicationStatus>('GET', '/v1/admin/cluster/replication');
   }
 
   /** GET /admin/cluster/shards — list shards. */
   async adminListShards(): Promise<ShardListResponse> {
-    return this.request<ShardListResponse>('GET', '/admin/cluster/shards');
+    return this.request<ShardListResponse>('GET', '/v1/admin/cluster/shards');
   }
 
   /** POST /admin/cluster/shards/rebalance — rebalance shards. */
   async adminRebalanceShards(request?: ShardRebalanceRequest): Promise<ShardRebalanceResponse> {
-    return this.request<ShardRebalanceResponse>('POST', '/admin/cluster/shards/rebalance', request ?? {});
+    return this.request<ShardRebalanceResponse>('POST', '/v1/admin/cluster/shards/rebalance', request ?? {});
   }
 
   /** GET /admin/cluster/maintenance — maintenance mode status. */
   async adminMaintenanceStatus(): Promise<MaintenanceStatus> {
-    return this.request<MaintenanceStatus>('GET', '/admin/cluster/maintenance');
+    return this.request<MaintenanceStatus>('GET', '/v1/admin/cluster/maintenance');
   }
 
   /** POST /admin/cluster/maintenance/enable — enable maintenance mode. */
   async adminEnableMaintenance(request: EnableMaintenanceRequest): Promise<MaintenanceStatus> {
-    return this.request<MaintenanceStatus>('POST', '/admin/cluster/maintenance/enable', request);
+    return this.request<MaintenanceStatus>('POST', '/v1/admin/cluster/maintenance/enable', request);
   }
 
   /** POST /admin/cluster/maintenance/disable — disable maintenance mode. */
   async adminDisableMaintenance(request?: DisableMaintenanceRequest): Promise<MaintenanceStatus> {
-    return this.request<MaintenanceStatus>('POST', '/admin/cluster/maintenance/disable', request ?? {});
+    return this.request<MaintenanceStatus>('POST', '/v1/admin/cluster/maintenance/disable', request ?? {});
   }
 
   // ---------------------------------------------------------------------------
@@ -2973,37 +2973,37 @@ export class DakeraClient {
 
   /** GET /admin/quotas — list all namespace quotas. */
   async adminListQuotas(): Promise<QuotaListResponse> {
-    return this.request<QuotaListResponse>('GET', '/admin/quotas');
+    return this.request<QuotaListResponse>('GET', '/v1/admin/quotas');
   }
 
   /** GET /admin/quotas/default — get default quota configuration. */
   async adminGetDefaultQuota(): Promise<DefaultQuotaResponse> {
-    return this.request<DefaultQuotaResponse>('GET', '/admin/quotas/default');
+    return this.request<DefaultQuotaResponse>('GET', '/v1/admin/quotas/default');
   }
 
   /** PUT /admin/quotas/default — set default quota configuration. */
   async adminSetDefaultQuota(request: SetDefaultQuotaRequest): Promise<SetQuotaResponse> {
-    return this.request<SetQuotaResponse>('PUT', '/admin/quotas/default', request);
+    return this.request<SetQuotaResponse>('PUT', '/v1/admin/quotas/default', request);
   }
 
   /** GET /admin/quotas/{namespace} — get namespace quota. */
   async adminGetQuota(namespace: string): Promise<QuotaStatus> {
-    return this.request<QuotaStatus>('GET', `/admin/quotas/${namespace}`);
+    return this.request<QuotaStatus>('GET', `/v1/admin/quotas/${namespace}`);
   }
 
   /** PUT /admin/quotas/{namespace} — set namespace quota. */
   async adminSetQuota(namespace: string, request: SetQuotaRequest): Promise<SetQuotaResponse> {
-    return this.request<SetQuotaResponse>('PUT', `/admin/quotas/${namespace}`, request);
+    return this.request<SetQuotaResponse>('PUT', `/v1/admin/quotas/${namespace}`, request);
   }
 
   /** DELETE /admin/quotas/{namespace} — remove namespace quota. */
   async adminDeleteQuota(namespace: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('DELETE', `/admin/quotas/${namespace}`);
+    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/quotas/${namespace}`);
   }
 
   /** POST /admin/quotas/{namespace}/check — check if operation would exceed quota. */
   async adminCheckQuota(namespace: string, request: QuotaCheckRequest): Promise<QuotaCheckResult> {
-    return this.request<QuotaCheckResult>('POST', `/admin/quotas/${namespace}/check`, request);
+    return this.request<QuotaCheckResult>('POST', `/v1/admin/quotas/${namespace}/check`, request);
   }
 
   // ---------------------------------------------------------------------------
@@ -3013,24 +3013,24 @@ export class DakeraClient {
   /** GET /admin/slow-queries — list recent slow queries. */
   async adminListSlowQueries(params?: { namespace?: string; query_type?: string; limit?: number }): Promise<unknown[]> {
     const qs = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
-    const path = qs ? `/admin/slow-queries?${qs}` : '/admin/slow-queries';
+    const path = qs ? `/v1/admin/slow-queries?${qs}` : '/v1/admin/slow-queries';
     return this.request<unknown[]>('GET', path);
   }
 
   /** GET /admin/slow-queries/summary — slow query summary. */
   async adminSlowQuerySummary(): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', '/admin/slow-queries/summary');
+    return this.request<Record<string, unknown>>('GET', '/v1/admin/slow-queries/summary');
   }
 
   /** DELETE /admin/slow-queries — clear slow query log. */
   async adminClearSlowQueries(namespace?: string): Promise<Record<string, unknown>> {
-    const path = namespace ? `/admin/slow-queries?namespace=${encodeURIComponent(namespace)}` : '/admin/slow-queries';
+    const path = namespace ? `/v1/admin/slow-queries?namespace=${encodeURIComponent(namespace)}` : '/v1/admin/slow-queries';
     return this.request<Record<string, unknown>>('DELETE', path);
   }
 
   /** PATCH /admin/slow-queries/config — update slow query configuration. */
   async adminUpdateSlowQueryConfig(config: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('PATCH', '/admin/slow-queries/config', config);
+    return this.request<Record<string, unknown>>('PATCH', '/v1/admin/slow-queries/config', config);
   }
 
   // ---------------------------------------------------------------------------
@@ -3039,42 +3039,42 @@ export class DakeraClient {
 
   /** GET /admin/backups — list all backups. */
   async adminListBackups(): Promise<BackupListResponse> {
-    return this.request<BackupListResponse>('GET', '/admin/backups');
+    return this.request<BackupListResponse>('GET', '/v1/admin/backups');
   }
 
   /** POST /admin/backups — create a new backup. */
   async adminCreateBackup(request: CreateBackupRequest): Promise<CreateBackupResponse> {
-    return this.request<CreateBackupResponse>('POST', '/admin/backups', request);
+    return this.request<CreateBackupResponse>('POST', '/v1/admin/backups', request);
   }
 
   /** GET /admin/backups/{id} — get backup details. */
   async adminGetBackup(backupId: string): Promise<BackupInfo> {
-    return this.request<BackupInfo>('GET', `/admin/backups/${backupId}`);
+    return this.request<BackupInfo>('GET', `/v1/admin/backups/${backupId}`);
   }
 
   /** DELETE /admin/backups/{id} — delete a backup. */
   async adminDeleteBackup(backupId: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('DELETE', `/admin/backups/${backupId}`);
+    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/backups/${backupId}`);
   }
 
   /** GET /admin/backups/schedule — get backup schedule. */
   async adminGetBackupSchedule(): Promise<BackupSchedule> {
-    return this.request<BackupSchedule>('GET', '/admin/backups/schedule');
+    return this.request<BackupSchedule>('GET', '/v1/admin/backups/schedule');
   }
 
   /** POST /admin/backups/schedule — update backup schedule. */
   async adminUpdateBackupSchedule(request: UpdateBackupScheduleRequest): Promise<BackupSchedule> {
-    return this.request<BackupSchedule>('POST', '/admin/backups/schedule', request);
+    return this.request<BackupSchedule>('POST', '/v1/admin/backups/schedule', request);
   }
 
   /** POST /admin/backups/restore — restore from backup. */
   async adminRestoreBackup(request: RestoreBackupRequest): Promise<RestoreBackupResponse> {
-    return this.request<RestoreBackupResponse>('POST', '/admin/backups/restore', request);
+    return this.request<RestoreBackupResponse>('POST', '/v1/admin/backups/restore', request);
   }
 
   /** GET /admin/backups/restore/{id} — restore operation status. */
   async adminGetRestoreStatus(restoreId: string): Promise<RestoreBackupResponse> {
-    return this.request<RestoreBackupResponse>('GET', `/admin/backups/restore/${restoreId}`);
+    return this.request<RestoreBackupResponse>('GET', `/v1/admin/backups/restore/${restoreId}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -3129,7 +3129,7 @@ export class DakeraClient {
 
   /** GET /admin/ttl/stats — TTL statistics across all namespaces. */
   async adminTtlStats(): Promise<TtlStatsResponse> {
-    return this.request<TtlStatsResponse>('GET', '/admin/ttl/stats');
+    return this.request<TtlStatsResponse>('GET', '/v1/admin/ttl/stats');
   }
 
   /** POST /v1/route — route a query to the best-matching namespace(s). */
@@ -3147,7 +3147,7 @@ export class DakeraClient {
 
   /** GET /admin/backups/{id}/download — download a backup as binary data. */
   async adminDownloadBackup(backupId: string): Promise<ArrayBuffer> {
-    const url = `${this.baseUrl}/admin/backups/${encodeURIComponent(backupId)}/download`;
+    const url = `${this.baseUrl}/v1/admin/backups/${encodeURIComponent(backupId)}/download`;
     const response = await fetch(url, {
       headers: { ...this.headers, Accept: 'application/octet-stream' },
     });
@@ -3159,7 +3159,7 @@ export class DakeraClient {
 
   /** POST /admin/backups/upload — upload a backup archive. */
   async adminUploadBackup(data: ArrayBuffer | Uint8Array): Promise<CreateBackupResponse> {
-    const url = `${this.baseUrl}/admin/backups/upload`;
+    const url = `${this.baseUrl}/v1/admin/backups/upload`;
     const headers: Record<string, string> = {};
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
@@ -3178,17 +3178,17 @@ export class DakeraClient {
 
   /** GET /admin/storage/tiers — storage tier overview. */
   async adminStorageTierOverview(): Promise<StorageTierOverview> {
-    return this.request<StorageTierOverview>('GET', '/admin/storage/tiers');
+    return this.request<StorageTierOverview>('GET', '/v1/admin/storage/tiers');
   }
 
   /** GET /admin/background-activity — current background activity. */
   async adminBackgroundActivity(): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', '/admin/background-activity');
+    return this.request<Record<string, unknown>>('GET', '/v1/admin/background-activity');
   }
 
   /** GET /admin/memory-type-stats — memory type distribution statistics. */
   async adminMemoryTypeStats(): Promise<MemoryTypeStatsResponse> {
-    return this.request<MemoryTypeStatsResponse>('GET', '/admin/memory-type-stats');
+    return this.request<MemoryTypeStatsResponse>('GET', '/v1/admin/memory-type-stats');
   }
 
   /** POST /admin/namespaces/migrate-dimensions — migrate namespace embedding dimensions. */
@@ -3197,7 +3197,7 @@ export class DakeraClient {
   ): Promise<MigrateDimensionsResponse> {
     return this.request<MigrateDimensionsResponse>(
       'POST',
-      '/admin/namespaces/migrate-dimensions',
+      '/v1/admin/namespaces/migrate-dimensions',
       request ?? {},
     );
   }
@@ -3212,7 +3212,7 @@ export class DakeraClient {
    * A `remaining: 0` result means all vectors are at full ONNX quality.
    */
   async adminDrainReembed(request?: DrainReembedRequest): Promise<DrainReembedResponse> {
-    return this.request<DrainReembedResponse>('POST', '/admin/reembed/drain', request ?? {});
+    return this.request<DrainReembedResponse>('POST', '/v1/admin/reembed/drain', request ?? {});
   }
 
   /**
@@ -3223,6 +3223,6 @@ export class DakeraClient {
    * of 0 means steady state. Requires Admin scope.
    */
   async adminReembedStaticCount(): Promise<StaticCountResponse> {
-    return this.request<StaticCountResponse>('GET', '/admin/reembed/static-count');
+    return this.request<StaticCountResponse>('GET', '/v1/admin/reembed/static-count');
   }
 }
