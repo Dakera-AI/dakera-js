@@ -59,7 +59,7 @@ describe('Admin Methods', () => {
       expect(result.backups[0].id).toBe('bk-1');
       expect(result.total).toBe(2);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups');
+      expect(url).toContain('/v1/admin/backups');
       expect(opts.method).toBe('GET');
     });
 
@@ -82,7 +82,7 @@ describe('Admin Methods', () => {
       expect(result.id).toBe('bk-new');
       expect(result.status).toBe('in_progress');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups');
+      expect(url).toContain('/v1/admin/backups');
       expect(opts.method).toBe('POST');
       const body = JSON.parse(opts.body as string);
       expect(body.label).toBe('pre-deploy');
@@ -105,7 +105,7 @@ describe('Admin Methods', () => {
       expect(result.id).toBe('bk-1');
       expect(result.status).toBe('completed');
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/bk-1');
+      expect(url).toContain('/v1/admin/backups/bk-1');
     });
   });
 
@@ -117,7 +117,7 @@ describe('Admin Methods', () => {
 
       expect(result.success).toBe(true);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/bk-1');
+      expect(url).toContain('/v1/admin/backups/bk-1');
       expect(opts.method).toBe('DELETE');
     });
   });
@@ -136,7 +136,7 @@ describe('Admin Methods', () => {
       expect(result.enabled).toBe(true);
       expect(result.cron).toBe('0 2 * * *');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/schedule');
+      expect(url).toContain('/v1/admin/backups/schedule');
       expect(opts.method).toBe('GET');
     });
   });
@@ -157,7 +157,7 @@ describe('Admin Methods', () => {
 
       expect(result.cron).toBe('0 3 * * *');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/schedule');
+      expect(url).toContain('/v1/admin/backups/schedule');
       expect(opts.method).toBe('POST');
     });
   });
@@ -175,7 +175,7 @@ describe('Admin Methods', () => {
       expect(result.restore_id).toBe('rst-1');
       expect(result.status).toBe('in_progress');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/restore');
+      expect(url).toContain('/v1/admin/backups/restore');
       expect(opts.method).toBe('POST');
     });
   });
@@ -194,7 +194,7 @@ describe('Admin Methods', () => {
       expect(result.restore_id).toBe('rst-1');
       expect(result.status).toBe('completed');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/restore/rst-1');
+      expect(url).toContain('/v1/admin/backups/restore/rst-1');
       expect(opts.method).toBe('GET');
     });
   });
@@ -213,7 +213,7 @@ describe('Admin Methods', () => {
 
       expect(result).toBe(mockBuffer);
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/bk-1/download');
+      expect(url).toContain('/v1/admin/backups/bk-1/download');
     });
 
     it('should throw on failed download', async () => {
@@ -241,7 +241,7 @@ describe('Admin Methods', () => {
 
       expect(result.id).toBe('bk-uploaded');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/backups/upload');
+      expect(url).toContain('/v1/admin/backups/upload');
       expect(opts.method).toBe('POST');
       expect(opts.headers['Content-Type']).toBe('application/gzip');
     });
@@ -275,7 +275,7 @@ describe('Admin Methods', () => {
 
       expect(result.quotas).toHaveLength(2);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas');
+      expect(url).toContain('/v1/admin/quotas');
       expect(opts.method).toBe('GET');
     });
   });
@@ -292,7 +292,7 @@ describe('Admin Methods', () => {
 
       expect(result.max_vectors).toBe(1000000);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/default');
+      expect(url).toContain('/v1/admin/quotas/default');
       expect(opts.method).toBe('GET');
     });
   });
@@ -305,7 +305,7 @@ describe('Admin Methods', () => {
 
       expect(result.success).toBe(true);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/default');
+      expect(url).toContain('/v1/admin/quotas/default');
       expect(opts.method).toBe('PUT');
     });
   });
@@ -324,7 +324,7 @@ describe('Admin Methods', () => {
       expect(result.namespace).toBe('ns-a');
       expect(result.usage_percent).toBe(5.0);
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/ns-a');
+      expect(url).toContain('/v1/admin/quotas/ns-a');
     });
   });
 
@@ -336,7 +336,7 @@ describe('Admin Methods', () => {
 
       expect(result.success).toBe(true);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/ns-a');
+      expect(url).toContain('/v1/admin/quotas/ns-a');
       expect(opts.method).toBe('PUT');
     });
   });
@@ -349,7 +349,7 @@ describe('Admin Methods', () => {
 
       expect(result.success).toBe(true);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/ns-a');
+      expect(url).toContain('/v1/admin/quotas/ns-a');
       expect(opts.method).toBe('DELETE');
     });
   });
@@ -367,7 +367,7 @@ describe('Admin Methods', () => {
       expect(result.allowed).toBe(true);
       expect(result.remaining).toBe(95000);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/quotas/ns-a/check');
+      expect(url).toContain('/v1/admin/quotas/ns-a/check');
       expect(opts.method).toBe('POST');
     });
 
@@ -400,7 +400,7 @@ describe('Admin Methods', () => {
 
       expect(result.enabled).toBe(false);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/maintenance');
+      expect(url).toContain('/v1/admin/cluster/maintenance');
       expect(opts.method).toBe('GET');
     });
   });
@@ -418,7 +418,7 @@ describe('Admin Methods', () => {
       expect(result.enabled).toBe(true);
       expect(result.reason).toBe('Rolling upgrade');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/maintenance/enable');
+      expect(url).toContain('/v1/admin/cluster/maintenance/enable');
       expect(opts.method).toBe('POST');
     });
   });
@@ -434,7 +434,7 @@ describe('Admin Methods', () => {
 
       expect(result.enabled).toBe(false);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/maintenance/disable');
+      expect(url).toContain('/v1/admin/cluster/maintenance/disable');
       expect(opts.method).toBe('POST');
     });
   });
@@ -457,7 +457,7 @@ describe('Admin Methods', () => {
       expect(result.replication_factor).toBe(3);
       expect(result.in_sync_replicas).toBe(3);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/replication');
+      expect(url).toContain('/v1/admin/cluster/replication');
       expect(opts.method).toBe('GET');
     });
   });
@@ -477,7 +477,7 @@ describe('Admin Methods', () => {
       expect(result.shards).toHaveLength(2);
       expect(result.shards[0].id).toBe('shard-0');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/shards');
+      expect(url).toContain('/v1/admin/cluster/shards');
       expect(opts.method).toBe('GET');
     });
   });
@@ -495,7 +495,7 @@ describe('Admin Methods', () => {
       expect(result.status).toBe('rebalancing');
       expect(result.moves).toBe(3);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/cluster/shards/rebalance');
+      expect(url).toContain('/v1/admin/cluster/shards/rebalance');
       expect(opts.method).toBe('POST');
     });
 
@@ -524,7 +524,7 @@ describe('Admin Methods', () => {
       expect(result).toHaveLength(2);
       expect(result[0]).toHaveProperty('query_id', 'q1');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/slow-queries');
+      expect(url).toContain('/v1/admin/slow-queries');
       expect(opts.method).toBe('GET');
     });
 
@@ -551,7 +551,7 @@ describe('Admin Methods', () => {
 
       expect(result.total_slow_queries).toBe(42);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/slow-queries/summary');
+      expect(url).toContain('/v1/admin/slow-queries/summary');
       expect(opts.method).toBe('GET');
     });
   });
@@ -564,7 +564,7 @@ describe('Admin Methods', () => {
 
       expect(result.cleared).toBe(42);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/slow-queries');
+      expect(url).toContain('/v1/admin/slow-queries');
       expect(url).not.toContain('namespace=');
       expect(opts.method).toBe('DELETE');
     });
@@ -590,7 +590,7 @@ describe('Admin Methods', () => {
 
       expect(result.threshold_ms).toBe(200);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/slow-queries/config');
+      expect(url).toContain('/v1/admin/slow-queries/config');
       expect(opts.method).toBe('PATCH');
     });
   });
@@ -612,7 +612,7 @@ describe('Admin Methods', () => {
 
       expect(result.tiers).toHaveLength(2);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/storage/tiers');
+      expect(url).toContain('/v1/admin/storage/tiers');
       expect(opts.method).toBe('GET');
     });
   });
@@ -631,7 +631,7 @@ describe('Admin Methods', () => {
 
       expect(result.active_jobs).toBe(2);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/background-activity');
+      expect(url).toContain('/v1/admin/background-activity');
       expect(opts.method).toBe('GET');
     });
   });
@@ -650,7 +650,7 @@ describe('Admin Methods', () => {
       expect(result.episodic).toBe(500);
       expect(result.total).toBe(900);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/memory-type-stats');
+      expect(url).toContain('/v1/admin/memory-type-stats');
       expect(opts.method).toBe('GET');
     });
   });
@@ -668,7 +668,7 @@ describe('Admin Methods', () => {
       expect(result.total_with_ttl).toBe(200);
       expect(result.expired_pending_cleanup).toBe(15);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/ttl/stats');
+      expect(url).toContain('/v1/admin/ttl/stats');
       expect(opts.method).toBe('GET');
     });
   });
@@ -691,7 +691,7 @@ describe('Admin Methods', () => {
       expect(result.status).toBe('completed');
       expect(result.migrated_count).toBe(5000);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/namespaces/migrate-dimensions');
+      expect(url).toContain('/v1/admin/namespaces/migrate-dimensions');
       expect(opts.method).toBe('POST');
     });
 
@@ -724,7 +724,7 @@ describe('Admin Methods', () => {
       expect(result.cycles).toBe(3);
       expect(result.timed_out).toBe(false);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/reembed/drain');
+      expect(url).toContain('/v1/admin/reembed/drain');
       expect(opts.method).toBe('POST');
     });
 
@@ -770,7 +770,7 @@ describe('Admin Methods', () => {
 
       expect(result.static_count).toBe(42);
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/admin/reembed/static-count');
+      expect(url).toContain('/v1/admin/reembed/static-count');
       expect(opts.method).toBe('GET');
     });
 
