@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.98] - 2026-06-23
+
+### Fixed
+
+- **`adminTtlCleanup()`** — add missing binding for `POST /v1/admin/ttl/cleanup`; previous
+  callers received a 404 silently. (DAK-7069, [#181](https://github.com/Dakera-AI/dakera-js/pull/181))
+- **Key management routes** — fix `createKey`, `listKeys`, `getKey`, `deleteKey`,
+  `deactivateKey`, `rotateKey`, `getKeyUsage` to use `/admin/keys` instead of the
+  incorrect `/v1/keys` path. (DAK-7066, [#182](https://github.com/Dakera-AI/dakera-js/pull/182))
+
+## [0.11.97] - 2026-06-21
+
+### Fixed
+
+- **Admin route prefix** — migrate extended ops routes from `/admin/*` to the canonical
+  `/v1/admin/*` prefix for consistency with server API. (DAK-7027,
+  [#174](https://github.com/Dakera-AI/dakera-js/pull/174))
+
+### Internal
+
+- Add integration tests for `ChatMemorySession`.
+  ([#173](https://github.com/Dakera-AI/dakera-js/pull/173))
+
 ## [0.11.96] - 2026-06-16
 
 ### Added
