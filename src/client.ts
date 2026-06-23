@@ -2279,37 +2279,37 @@ export class DakeraClient {
 
   /** Create a new API key */
   async createKey(request: CreateKeyRequest): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', '/v1/keys', request);
+    return this.request<ApiKey>('POST', '/admin/keys', request);
   }
 
   /** List all API keys */
   async listKeys(): Promise<ApiKey[]> {
-    return this.request<ApiKey[]>('GET', '/v1/keys');
+    return this.request<ApiKey[]>('GET', '/admin/keys');
   }
 
   /** Get an API key by ID */
   async getKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('GET', `/v1/keys/${keyId}`);
+    return this.request<ApiKey>('GET', `/admin/keys/${keyId}`);
   }
 
   /** Delete an API key */
   async deleteKey(keyId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/v1/keys/${keyId}`);
+    return this.request<{ status: string }>('DELETE', `/admin/keys/${keyId}`);
   }
 
   /** Deactivate an API key */
   async deactivateKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', `/v1/keys/${keyId}/deactivate`);
+    return this.request<ApiKey>('POST', `/admin/keys/${keyId}/deactivate`);
   }
 
   /** Rotate an API key */
   async rotateKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', `/v1/keys/${keyId}/rotate`);
+    return this.request<ApiKey>('POST', `/admin/keys/${keyId}/rotate`);
   }
 
   /** Get usage statistics for an API key */
   async keyUsage(keyId: string): Promise<KeyUsage> {
-    return this.request<KeyUsage>('GET', `/v1/keys/${keyId}/usage`);
+    return this.request<KeyUsage>('GET', `/admin/keys/${keyId}/usage`);
   }
 
   // ===========================================================================
