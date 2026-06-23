@@ -2744,6 +2744,14 @@ export interface TtlStatsResponse {
   total_expired: number;
 }
 
+/** Response from POST /v1/admin/ttl/cleanup */
+export interface TtlCleanupResponse {
+  success: boolean;
+  vectors_removed: number;
+  namespaces_cleaned: string[];
+  message: string;
+}
+
 /** A single route match from the query router. */
 export interface RouteMatch {
   namespace: string;
