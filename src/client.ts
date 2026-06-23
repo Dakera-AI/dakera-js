@@ -215,6 +215,7 @@ import type {
   // Engine parity — Phase 3
   FullTextIndexStats,
   FulltextDeleteResponse,
+  TtlCleanupResponse,
   TtlStatsResponse,
   RouteRequest,
   RouteResponse,
@@ -3130,6 +3131,12 @@ export class DakeraClient {
   /** GET /admin/ttl/stats — TTL statistics across all namespaces. */
   async adminTtlStats(): Promise<TtlStatsResponse> {
     return this.request<TtlStatsResponse>('GET', '/v1/admin/ttl/stats');
+  }
+
+  /** POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a namespace. */
+  async adminTtlCleanup(namespace?: string): Promise<TtlCleanupResponse> {
+    const body = namespace !== undefined ? { namespace } : {};
+    return this.request<TtlCleanupResponse>('POST', '/v1/admin/ttl/cleanup', body);
   }
 
   /** POST /v1/route — route a query to the best-matching namespace(s). */

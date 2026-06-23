@@ -673,6 +673,40 @@ describe('Admin Methods', () => {
     });
   });
 
+  describe('adminTtlCleanup', () => {
+    it('should run TTL cleanup scoped to namespace', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        success: true,
+        vectors_removed: 42,
+        namespaces_cleaned: ['ns-1'],
+        message: 'Cleanup complete',
+      }));
+
+      const result = await client.adminTtlCleanup('ns-1');
+
+      expect(result.success).toBe(true);
+      expect(result.vectors_removed).toBe(42);
+      expect(result.namespaces_cleaned).toContain('ns-1');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/admin/ttl/cleanup');
+      expect(opts.method).toBe('POST');
+    });
+
+    it('should run global TTL cleanup when no namespace given', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        success: true,
+        vectors_removed: 100,
+        namespaces_cleaned: ['ns-1', 'ns-2'],
+        message: 'Global cleanup complete',
+      }));
+
+      const result = await client.adminTtlCleanup();
+
+      expect(result.success).toBe(true);
+      expect(result.vectors_removed).toBe(100);
+    });
+  });
+
   describe('adminMigrateNamespaceDimensions', () => {
     it('should migrate namespace dimensions', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
