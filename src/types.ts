@@ -354,8 +354,10 @@ export interface ClientOptions {
  * - minilm: MiniLM-L6 - Fast, good quality (384 dimensions)
  * - bge-small: BGE-small - Balanced performance (384 dimensions)
  * - e5-small: E5-small - High quality (384 dimensions)
+ * - modernbert-embed-base: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
+ * - gte-modernbert-base: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
  */
-export type EmbeddingModel = 'bge-large' | 'minilm' | 'bge-small' | 'e5-small';
+export type EmbeddingModel = 'bge-large' | 'minilm' | 'bge-small' | 'e5-small' | 'modernbert-embed-base' | 'gte-modernbert-base';
 
 /**
  * Input for upserting a text document with automatic embedding.

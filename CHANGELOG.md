@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.99] - 2026-06-24
+
+### Added
+
+- **`EmbeddingModel` — `'modernbert-embed-base'` and `'gte-modernbert-base'`** — two new union
+  members matching server DAK-7098/DAK-7102: `modernbert-embed-base` (768d, MRL, 8192 tokens)
+  and `gte-modernbert-base` (768d, MTEB retrieval 64.38). Pass via `model` in
+  `TextUpsertOptions` and `TextQueryOptions`.
+
 ## [0.11.98] - 2026-06-23
 
 ### Fixed
