@@ -1997,6 +1997,65 @@ describe('DakeraClient', () => {
       expect(result.results).toHaveLength(1);
       expect(result.results[0].score).toBe(0.9);
     });
+
+    it('should send modernbert-embed-base model in upsert request body', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          upserted_count: 1,
+          tokens_processed: 42,
+          model: 'modernbert-embed-base',
+          embedding_time_ms: 12,
+        }),
+      });
+
+      const result = await client.upsertText('test-ns', [{ id: 'd1', text: 'Hello' }], {
+        model: 'modernbert-embed-base',
+      });
+
+      expect(result.model).toBe('modernbert-embed-base');
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+      expect(body.model).toBe('modernbert-embed-base');
+    });
+
+    it('should send gte-modernbert-base model in upsert request body', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          upserted_count: 1,
+          tokens_processed: 55,
+          model: 'gte-modernbert-base',
+          embedding_time_ms: 10,
+        }),
+      });
+
+      const result = await client.upsertText('test-ns', [{ id: 'd2', text: 'World' }], {
+        model: 'gte-modernbert-base',
+      });
+
+      expect(result.model).toBe('gte-modernbert-base');
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+      expect(body.model).toBe('gte-modernbert-base');
+    });
+
+    it('should deserialize gte-modernbert-base model from query response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          results: [{ id: 'd1', score: 0.95 }],
+          model: 'gte-modernbert-base',
+          embedding_time_ms: 8,
+          search_time_ms: 2,
+        }),
+      });
+
+      const result = await client.queryText('test-ns', 'hello', { top_k: 1 });
+
+      expect(result.model).toBe('gte-modernbert-base');
+    });
   });
 
   // ---------------------------------------------------------------------------
