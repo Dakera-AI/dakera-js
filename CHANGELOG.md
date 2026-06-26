@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.100] - 2026-06-26
+
+### Changed
+
+- fix(changelog): correct reranker model org and version in CE-13 CHANGELOG entry (#186, #187)
+
 ## [0.11.99] - 2026-06-24
 
 ### Added
