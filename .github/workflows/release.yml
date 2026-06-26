@@ -16,6 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Verify manifest version matches release tag
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          MANIFEST_VERSION=$(node -p "require('./package.json').version")
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch: package.json='$MANIFEST_VERSION' release tag='$TAG_VERSION'"
+            echo ""
+            echo "Fix: bump package.json version to '$TAG_VERSION',"
+            echo "commit on the target SHA, delete this release, then recreate it on the bumped commit."
+            echo ""
+            echo "Root cause of DAK-7230 — this gate prevents registry rejects on version conflict."
+            exit 1
+          fi
+          echo "✅ Version verified: package.json=$MANIFEST_VERSION matches release tag ${{ github.ref_name }}"
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
