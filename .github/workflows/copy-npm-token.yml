@@ -1,0 +1,21 @@
+name: Copy NPM_TOKEN to dakera-ai-sdk
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  copy-token:
+    name: Copy NPM_TOKEN
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Copy NPM_TOKEN to dakera-ai-sdk
+        run: |
+          echo "${{ secrets.NPM_TOKEN }}" | gh secret set NPM_TOKEN -R dakera-ai/dakera-ai-sdk
+          echo "✅ NPM_TOKEN set on dakera-ai/dakera-ai-sdk"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
