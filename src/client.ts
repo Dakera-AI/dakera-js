@@ -25,11 +25,19 @@ function parseErrorCode(raw: unknown): ErrorCode {
   return ErrorCode.UNKNOWN;
 }
 
-/** Flatten server's nested recall item `{memory: {...}, score}` to flat `RecalledMemory`. */
+/** Flatten server's nested recall item `{memory: {...}, score, weighted_score, smart_score}` to flat `RecalledMemory`. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function flattenRecalledMemory(item: any): any {
   if (item && typeof item === 'object' && item.memory && typeof item.memory === 'object') {
-    return { ...item.memory, score: item.score, depth: item.depth };
+    // smart_score is the server's ranking key; prefer it so .score reflects actual rank order.
+    const score = item.smart_score ?? item.weighted_score ?? item.score;
+    return {
+      ...item.memory,
+      score,
+      smart_score: item.smart_score,
+      weighted_score: item.weighted_score,
+      depth: item.depth,
+    };
   }
   return item;
 }
