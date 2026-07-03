@@ -1721,6 +1721,69 @@ describe('DakeraClient', () => {
       expect(body.routing).toBe('hybrid');
       expect(body.rerank).toBe(true);
     });
+
+    it('should use smart_score as .score when server returns nested recall with smart_score', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          memories: [
+            {
+              memory: { id: 'mem_1', content: 'ranked memory', memory_type: 'episodic', importance: 0.8 },
+              score: 0.5,
+              weighted_score: 0.7,
+              smart_score: 0.9,
+            },
+          ],
+        }),
+      });
+
+      const result = await client.recall('agent-1', 'test');
+      const m = result.memories[0];
+      expect(m.score).toBeCloseTo(0.9);
+      expect(m.smart_score).toBeCloseTo(0.9);
+      expect(m.weighted_score).toBeCloseTo(0.7);
+    });
+
+    it('should fall back to weighted_score when smart_score absent', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          memories: [
+            {
+              memory: { id: 'mem_2', content: 'mem', memory_type: 'episodic', importance: 0.5 },
+              score: 0.4,
+              weighted_score: 0.65,
+            },
+          ],
+        }),
+      });
+
+      const result = await client.recall('agent-1', 'test');
+      expect(result.memories[0].score).toBeCloseTo(0.65);
+      expect(result.memories[0].smart_score).toBeUndefined();
+      expect(result.memories[0].weighted_score).toBeCloseTo(0.65);
+    });
+
+    it('should fall back to raw score when neither smart_score nor weighted_score present', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          memories: [
+            {
+              memory: { id: 'mem_3', content: 'mem', memory_type: 'episodic', importance: 0.5 },
+              score: 0.55,
+            },
+          ],
+        }),
+      });
+
+      const result = await client.recall('agent-1', 'test');
+      expect(result.memories[0].score).toBeCloseTo(0.55);
+      expect(result.memories[0].smart_score).toBeUndefined();
+    });
   });
 
   // ---------------------------------------------------------------------------

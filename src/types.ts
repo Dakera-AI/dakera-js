@@ -563,8 +563,12 @@ export interface RecalledMemory {
   memory_type: string;
   /** Importance score */
   importance: number;
-  /** Similarity score */
+  /** Ranking score — equals smart_score when present, then weighted_score, then raw score. */
   score: number;
+  /** Raw smart_score from the server (the primary ranking key). */
+  smart_score?: number;
+  /** Raw weighted_score from the server. */
+  weighted_score?: number;
   /** Optional metadata */
   metadata?: Record<string, unknown>;
   /** Creation timestamp */
