@@ -575,6 +575,10 @@ export interface RecalledMemory {
   created_at?: string;
   /** KG-3: hop depth at which this memory was found (only set on associated memories) */
   depth?: number;
+  /** Hybrid sub-score: vector similarity component (server v0.11.98+, absent when BM25-only) */
+  vector_score?: number;
+  /** Hybrid sub-score: BM25 text component (server v0.11.98+, absent when vector-only) */
+  text_score?: number;
 }
 
 /** COG-2 / KG-3: Response from the recall endpoint with optional associative memories */
