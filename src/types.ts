@@ -1031,6 +1031,8 @@ export interface UnifiedQueryRequest {
   includeVectors?: boolean;
   /** Distance metric for vector search */
   distanceMetric?: DistanceMetric;
+  /** Pagination cursor from a previous UnifiedQueryResponse.next_cursor */
+  cursor?: string;
 }
 
 /** Result from unified query */

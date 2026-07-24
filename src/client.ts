@@ -1072,6 +1072,8 @@ export class DakeraClient {
       includeMetadata?: boolean;
       includeVectors?: boolean;
       distanceMetric?: string;
+      /** Pagination cursor from a previous response's next_cursor field. */
+      cursor?: string;
     }
   ): Promise<UnifiedQueryResponse> {
     const body: Record<string, unknown> = {
@@ -1086,6 +1088,9 @@ export class DakeraClient {
     }
     if (options.distanceMetric) {
       body.distance_metric = options.distanceMetric;
+    }
+    if (options.cursor) {
+      body.cursor = options.cursor;
     }
 
     return this.request<UnifiedQueryResponse>(
