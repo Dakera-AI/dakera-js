@@ -2179,4 +2179,62 @@ describe('DakeraClient', () => {
       expect(url).toContain('/v1/memory/consolidate');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Cursor pagination — unifiedQuery (DAK-7525)
+  // ---------------------------------------------------------------------------
+
+  describe('unifiedQuery cursor pagination', () => {
+    const mockUnifiedResponse = {
+      results: [{ id: 'vec1', score: 0.9 }],
+      next_cursor: 'cursor-xyz',
+    };
+
+    it('includes cursor in request body when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => mockUnifiedResponse,
+      });
+
+      await client.unifiedQuery('test-ns', {
+        rankBy: { vector: [0.1, 0.2, 0.3] },
+        cursor: 'abc',
+      });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.cursor).toBe('abc');
+    });
+
+    it('omits cursor from request body when not provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ results: [] }),
+      });
+
+      await client.unifiedQuery('test-ns', {
+        rankBy: { vector: [0.1, 0.2, 0.3] },
+      });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.cursor).toBeUndefined();
+    });
+
+    it('returns next_cursor from server response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => mockUnifiedResponse,
+      });
+
+      const result = await client.unifiedQuery('test-ns', {
+        rankBy: { vector: [0.1, 0.2, 0.3] },
+      });
+
+      expect((result as any).next_cursor).toBe('cursor-xyz');
+    });
+  });
 });
