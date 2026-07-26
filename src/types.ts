@@ -531,6 +531,12 @@ export interface StoreMemoryRequest {
   tags?: string[];
   /** Pre-computed embedding */
   embedding?: number[];
+  /**
+   * Bi-temporal validity start — Unix timestamp (seconds) indicating when this
+   * memory becomes temporally valid. Defaults to ingest time when omitted.
+   * Used by temporal recall queries (server v0.11.98+, DAK-7424).
+   */
+  valid_from?: number;
 }
 
 /** A stored memory */
