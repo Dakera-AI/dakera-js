@@ -2120,6 +2120,18 @@ export class DakeraClient {
     return this.request<string>('GET', '/v1/ops/metrics');
   }
 
+  /** Return all active DAKERA_* env vars (non-secret) from the running server (DAK-7477).
+   *
+   *  Requires Admin scope. Returns a record mapping DAKERA_* env var names to their
+   *  values, plus `_version` and optionally `_build_sha`. Secret-bearing keys
+   *  (TOKEN, KEY, SECRET, PASSWORD, CRED, URL, URI, DSN) are filtered server-side.
+   *
+   *  Used by bench harnesses to verify the server is running with the exact
+   *  feature-flag configuration requested before scoring. */
+  async debugConfig(): Promise<Record<string, string>> {
+    return this.request<Record<string, string>>('GET', '/debug/config');
+  }
+
   /** Get cluster status */
   async clusterStatus(): Promise<ClusterStatus> {
     return this.request<ClusterStatus>('GET', '/v1/admin/cluster/status');

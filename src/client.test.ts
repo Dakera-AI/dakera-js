@@ -1527,6 +1527,41 @@ describe('DakeraClient', () => {
     });
   });
 
+  describe('debugConfig (DAK-7477)', () => {
+    it('GETs /debug/config and returns env var map', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            DAKERA_ENABLE_BM25: 'true',
+            DAKERA_RERANKER_ENABLED: 'true',
+            _version: '0.11.102',
+            _build_sha: 'abc1234',
+          }),
+          { status: 200, headers: new Headers({ 'content-type': 'application/json' }) },
+        ),
+      );
+
+      const result = await client.debugConfig();
+
+      expect(result._version).toBe('0.11.102');
+      expect(result.DAKERA_ENABLE_BM25).toBe('true');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/debug/config');
+      expect(opts.method).toBe('GET');
+    });
+
+    it('throws AuthorizationError on 403 (Admin scope required)', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'Admin scope required', code: 'AUTHORIZATION_ERROR' }),
+          { status: 403, headers: new Headers({ 'content-type': 'application/json' }) },
+        ),
+      );
+
+      await expect(client.debugConfig()).rejects.toThrow('Admin scope required');
+    });
+  });
+
   describe('opsMetrics (INFRA-3)', () => {
     const PROMETHEUS_TEXT = [
       '# HELP dakera_memory_store_total Total memory store operations',
