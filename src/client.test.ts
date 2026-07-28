@@ -967,6 +967,39 @@ describe('DakeraClient', () => {
       const body = JSON.parse(init?.body as string);
       expect(body.expires_at).toBeUndefined();
     });
+
+    // bi-temporal valid_from — server v0.11.98+ (DAK-7424)
+    it('includes valid_from in request body when set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ memory: { id: 'mem_2', content: 'test' }, embedding_time_ms: 5 }),
+      });
+
+      await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic', valid_from: 1700000000 });
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memory/store');
+      const body = JSON.parse(init?.body as string);
+      expect(body.valid_from).toBe(1700000000);
+      expect(body.agent_id).toBe('agent-1');
+    });
+
+    it('omits valid_from from request body when not set', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ memory: { id: 'mem_3', content: 'test' }, embedding_time_ms: 5 }),
+      });
+
+      await client.storeMemory('agent-1', { content: 'test', memory_type: 'episodic' });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init?.body as string);
+      expect(body.valid_from).toBeUndefined();
+    });
   });
 
   // ---------------------------------------------------------------------------
