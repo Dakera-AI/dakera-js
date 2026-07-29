@@ -243,6 +243,9 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
+/** SDK version, kept in sync with package.json. Used for the default User-Agent. */
+const SDK_VERSION = '0.11.104';
+
 /**
  * Dakera client for interacting with the AI memory platform.
  *
@@ -293,6 +296,8 @@ export class DakeraClient {
 
     this.headers = {
       'Content-Type': 'application/json',
+      // User-Agent is honored in Node; browsers drop it (forbidden header).
+      'User-Agent': `dakera-js/${SDK_VERSION}`,
       ...options.headers,
     };
 
