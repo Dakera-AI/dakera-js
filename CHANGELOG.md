@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.105] - 2026-08-05
+
+### Added
+
+- **`debugConfig()` method** — fetches the running server's configuration snapshot via
+  `GET /debug/config`. Useful for introspection and debugging server-side settings at
+  runtime (DAK-7477, DAK-7534). ([#210](https://github.com/Dakera-AI/dakera-js/pull/210))
+
+- **Cursor pagination on `unifiedQuery`** — `UnifiedQueryRequest` now accepts an optional
+  `cursor` string; `UnifiedQueryResponse` returns one when more pages remain. Enables
+  page-stable traversal of large memory sets without offset drift (DAK-7424 follow-up).
+  ([#208](https://github.com/Dakera-AI/dakera-js/pull/208))
+
+- **`valid_from` on `StoreMemoryRequest`** — clients can now set the bi-temporal anchor
+  timestamp when storing a memory, enabling backdated ingestion and replay workflows
+  (DAK-7424). ([#209](https://github.com/Dakera-AI/dakera-js/pull/209))
+
+- **Default `User-Agent` header** — every request now includes a
+  `User-Agent: dakera-js/0.11.105` header for SDK attribution, traffic analysis, and
+  observability (DAK-7617). ([#214](https://github.com/Dakera-AI/dakera-js/pull/214))
+
+## [0.11.104] - 2026-07-24
+
+### Changed
+
+- **Dependency maintenance** — dev-dependency and tooling updates only: `@types/node`,
+  `eslint`, `typescript-eslint` (×2), `vitest`, `brace-expansion`, and
+  `actions/setup-node`. No API surface changes.
+
+
 ## [0.11.103] - 2026-07-16
 
 ### Added
