@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.106] - 2026-08-07
+
+### Security
+
+- **brace-expansion DoS fix** — upgraded transitive dependency `brace-expansion` from
+  5.0.7 to 5.0.9, resolving two HIGH-severity CVEs: unbounded expansion causing OOM crash
+  ([GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg)) and bypass
+  of the CVE-2026-14257 mitigation
+  ([GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895)).
+
+- **postcss arbitrary file read fix** — upgraded transitive dependency `postcss` from
+  8.5.22 to 8.5.26, resolving MODERATE-severity
+  [GHSA-fxqj-rqcc-2cmp](https://github.com/advisories/GHSA-fxqj-rqcc-2cmp): incomplete
+  fix allowing attacker-controlled `sourceMappingURL` to read arbitrary `.map` files when
+  `from` is unset.
+
 ## [0.11.105] - 2026-08-05
 
 ### Added
