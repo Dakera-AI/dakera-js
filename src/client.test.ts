@@ -578,6 +578,19 @@ describe('DakeraClient', () => {
       expect(resp.filtered).toBe(0);
       expect(resp.memories).toHaveLength(0);
     });
+
+    it('exposes truncated=true when server signals result was capped', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ memories: [], total: 500, filtered: 100, truncated: true }),
+      });
+
+      const resp = await client.batchRecall({ agent_id: 'agent-x', limit: 100 });
+
+      expect(resp.truncated).toBe(true);
+    });
   });
 
   describe('batchForget', () => {
