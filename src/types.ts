@@ -1661,6 +1661,8 @@ export interface BatchRecallResponse {
   total: number;
   /** Number of memories that passed the filter. */
   filtered: number;
+  /** True when the result set was capped by `limit` and more matching memories exist. */
+  truncated: boolean;
 }
 
 /** Request body for `DELETE /v1/memories/forget/batch`. */
