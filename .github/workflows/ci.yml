@@ -33,6 +33,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify SDK_VERSION matches package.json
+        run: |
+          SDK_VER=$(grep "const SDK_VERSION" src/client.ts | grep -o "'[0-9.]*'" | tr -d "'")
+          PKG_VER=$(node -p "require('./package.json').version")
+          if [ "$SDK_VER" != "$PKG_VER" ]; then
+            echo "SDK_VERSION '$SDK_VER' in src/client.ts does not match package.json '$PKG_VER'"
+            exit 1
+          fi
+          echo "Version check passed: $SDK_VER"
+
       - name: Lint
         run: npm run lint
 
