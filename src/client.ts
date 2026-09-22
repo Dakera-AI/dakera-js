@@ -16,6 +16,8 @@ import {
   ValidationError,
   DakeraError,
 } from './errors';
+import { parseCapabilities, requireCapability } from './capabilities';
+import type { CapabilityKind, ServerCapabilities } from './capabilities';
 
 /** Map a raw server code string to a typed ErrorCode, defaulting to UNKNOWN. */
 function parseErrorCode(raw: unknown): ErrorCode {
@@ -244,7 +246,7 @@ const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
 /** SDK version, kept in sync with package.json. Used for the default User-Agent. */
-const SDK_VERSION = '0.11.107';
+const SDK_VERSION = '0.12.0';
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -274,6 +276,12 @@ export class DakeraClient {
   private readonly odeUrl?: string;
   /** OPS-1: rate-limit headers from the most recent API response. */
   private _lastRateLimitHeaders: RateLimitHeaders | null = null;
+  /** R9: per-instance capabilities cache (`GET /v1/capabilities`). */
+  private _capabilities: ServerCapabilities | null = null;
+  /** R9: the server answered 404 for capabilities (pre-0.12) — stop asking. */
+  private _capabilitiesUnavailable = false;
+  /** R9: fetch capabilities lazily and validate requests before sending. */
+  private readonly preflight: boolean;
 
   constructor(options: ClientOptions | string) {
     if (typeof options === 'string') {
@@ -285,6 +293,7 @@ export class DakeraClient {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.connectTimeout = options.connectTimeout ?? this.timeout;
     this.odeUrl = options.odeUrl?.replace(/\/$/, '');
+    this.preflight = options.preflight ?? false;
 
     const rb = options.retryBackoff ?? {};
     this.retryConfig = {
@@ -313,6 +322,74 @@ export class DakeraClient {
    */
   get lastRateLimitHeaders(): RateLimitHeaders | null {
     return this._lastRateLimitHeaders;
+  }
+
+  // ===========================================================================
+  // Server capabilities (R9 / DAK-10004)
+  // ===========================================================================
+
+  /**
+   * What the connected server can do — `GET /v1/capabilities` (server v0.12+).
+   *
+   * Returns the models the server can load (and which one is active), index
+   * kinds, distance metrics, the search mode it runs, whether the R2 `records`
+   * surface is enabled and whether a re-embed is still pending. The document is
+   * cached on this client instance; pass `{ refresh: true }` to fetch it again.
+   * Unknown fields and unknown strings in the document are kept rather than
+   * rejected (see {@link parseCapabilities}).
+   *
+   * @throws NotFoundError the server predates `/v1/capabilities`.
+   *
+   * @example
+   * ```typescript
+   * const caps = await client.capabilities();
+   * caps.models.map((m) => m.name);   // ['bge-large', 'minilm', ...]
+   * caps.records.enabled;             // R2 records switched on?
+   * caps.reembed_pending;             // store still mixing two embedding spaces?
+   * ```
+   */
+  async capabilities(options: { refresh?: boolean } = {}): Promise<ServerCapabilities> {
+    if (this._capabilities === null || options.refresh) {
+      const raw = await this.request<unknown>('GET', '/v1/capabilities');
+      this._capabilities = parseCapabilities(raw);
+      this._capabilitiesUnavailable = false;
+    }
+    return this._capabilities;
+  }
+
+  /**
+   * Throw `UnsupportedCapabilityError` unless the server advertises `value`
+   * for `kind` (`model`, `index_kind`, `distance_metric`, `search_mode`,
+   * `query_language`). Fetches (and caches) capabilities on first use.
+   * `search_mode` is process-wide on the server (`DAKERA_SEARCH_MODE`), so this
+   * is the pre-flight for tooling that configures it rather than for a
+   * per-request field.
+   */
+  async requireSupported(kind: CapabilityKind, value: string): Promise<void> {
+    requireCapability(await this.capabilities(), kind, value);
+  }
+
+  /**
+   * Validate `value` against cached capabilities before a request. Uses the
+   * cache when populated; fetches only when `preflight: true` was passed to the
+   * constructor. A 404 (pre-0.12 server) disables the check for the lifetime
+   * of this client.
+   */
+  private async preflightCheck(kind: CapabilityKind, value: string): Promise<void> {
+    let caps = this._capabilities;
+    if (caps === null) {
+      if (!this.preflight || this._capabilitiesUnavailable) return;
+      try {
+        caps = await this.capabilities();
+      } catch (error) {
+        if (error instanceof NotFoundError) {
+          this._capabilitiesUnavailable = true;
+          return;
+        }
+        throw error;
+      }
+    }
+    requireCapability(caps, kind, value);
   }
 
   private computeBackoff(attempt: number): number {
@@ -537,6 +614,7 @@ export class DakeraClient {
     };
 
     if (options.distanceMetric) {
+      await this.preflightCheck('distance_metric', options.distanceMetric);
       body.distance_metric = options.distanceMetric;
     }
     if (options.consistency) {
@@ -833,7 +911,10 @@ export class DakeraClient {
   ): Promise<NamespaceInfo> {
     const body: Record<string, unknown> = {};
     if (options.dimensions) body.dimension = options.dimensions;
-    if (options.indexType) body.index_type = options.indexType;
+    if (options.indexType) {
+      await this.preflightCheck('index_kind', options.indexType);
+      body.index_type = options.indexType;
+    }
     if (options.metadata) body.metadata = options.metadata;
 
     const response = await this.request<ConfigureNamespaceResponse>(
@@ -858,6 +939,9 @@ export class DakeraClient {
     namespace: string,
     request: ConfigureNamespaceRequest
   ): Promise<ConfigureNamespaceResponse> {
+    if (request.distance) {
+      await this.preflightCheck('distance_metric', request.distance);
+    }
     return this.request<ConfigureNamespaceResponse>('PUT', `/v1/namespaces/${namespace}`, request);
   }
 
@@ -1352,6 +1436,7 @@ export class DakeraClient {
     };
 
     if (options.model) {
+      await this.preflightCheck('model', options.model);
       body.model = options.model;
     }
 
@@ -1403,6 +1488,7 @@ export class DakeraClient {
       body.filter = options.filter;
     }
     if (options.model) {
+      await this.preflightCheck('model', options.model);
       body.model = options.model;
     }
 
@@ -1453,6 +1539,7 @@ export class DakeraClient {
       body.filter = options.filter;
     }
     if (options.model) {
+      await this.preflightCheck('model', options.model);
       body.model = options.model;
     }
 

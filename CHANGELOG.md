@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-22
+
+### Added
+
+- **Forward-compat contract (R9, DAK-10004)** — the server's registries (models, index kinds,
+  search modes, distance metrics, record representation kinds, block dtypes) grow over time and
+  `GET /v1/capabilities` documents the rule: every field is additive; unknown fields and unknown
+  strings inside lists MUST be ignored; `capabilities_version` bumps only on a breaking reshape.
+  This release makes the SDK honour that rule end to end and moves it to the 0.12 line.
+- **Widened wire enums** — `EmbeddingModel`, `DistanceMetric`, `RoutingMode`, `FusionStrategy`
+  and the new `IndexKind`, `SearchMode`, `RepresentationKind`, `BlockDType` are now
+  `Known* | (string & {})`: the `Known*` literal unions keep autocomplete and exhaustiveness for
+  the values this SDK declares, while a newer server string type-checks and never fails at
+  runtime. `KNOWN_*` arrays and `isKnown*()` guards narrow at runtime. `'bge-m3'`, `'ivfpq'` and
+  `'rabitq'` are declared for the strings server v0.12 adds.
+- **`client.capabilities({ refresh })`** — typed `ServerCapabilities` for `GET /v1/capabilities`:
+  models (name, aliases, dimension, context window, active flag, MRL dims), index kinds (all /
+  vector / live), distance metrics, the search mode the server runs and every value it accepts
+  (`search_modes_accepted` prose parsed, aliases expanded), `records` (enabled, kinds, dtypes,
+  limits), `query_languages`, `reembed_pending`. Cached per client instance; `refresh: true`
+  re-fetches. `parseCapabilities()` is the runtime guard (never throws on a newer document; keeps
+  the verbatim document in `raw`). Helpers: `findModel`, `activeModel`, `supportedValues`,
+  `supportsCapability`, `requireCapability`.
+- **Pre-flight validation** — `upsertText` / `queryText` / `batchQueryText` (`model`),
+  `createNamespace` (`indexType`), `configureNamespace` and `query` (distance metric) check the
+  requested value against cached capabilities *before* sending and throw
+  `UnsupportedCapabilityError` (a `ValidationError`) whose message and `.supported` list name what
+  the server accepts. Runs whenever `capabilities()` has been called; `new DakeraClient({ ...,
+  preflight: true })` fetches lazily on first use and degrades silently on a pre-0.12 server
+  (404). `client.requireSupported(kind, value)` exposes the same check for `search_mode` and
+  `query_language`.
+
+### Changed
+
+- Version 0.11.107 → 0.12.0 (SDK line now tracks server v0.12).
+
 ## [0.11.106] - 2026-08-07
 
 ### Security

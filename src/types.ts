@@ -55,8 +55,82 @@ export function sessionId(id: string): SessionId { return id as SessionId; }
 /** Read consistency level for queries */
 export type ReadConsistency = 'strong' | 'eventual' | 'bounded_staleness';
 
-/** Distance metric for similarity search */
-export type DistanceMetric = 'cosine' | 'euclidean' | 'dot_product';
+// ============================================================================
+// Forward-compatible wire enums (R9 / DAK-10004)
+//
+// The server's registries grow over time and the capabilities contract says
+// clients MUST ignore strings they do not know. Every wire enum below is
+// therefore a `Known*` literal union (what this SDK declares — autocomplete,
+// exhaustiveness in *your* code) widened with `(string & {})` so a newer server
+// string type-checks and never fails at runtime. Use the `isKnown*` guards to
+// narrow.
+// ============================================================================
+
+/** Distance metrics this SDK declares. */
+export type KnownDistanceMetric = 'cosine' | 'euclidean' | 'dot_product';
+/** Distance metric for similarity search — a known value or any newer server string. */
+export type DistanceMetric = KnownDistanceMetric | (string & {});
+export const KNOWN_DISTANCE_METRICS: readonly KnownDistanceMetric[] = [
+  'cosine',
+  'euclidean',
+  'dot_product',
+];
+export function isKnownDistanceMetric(value: unknown): value is KnownDistanceMetric {
+  return (KNOWN_DISTANCE_METRICS as readonly unknown[]).includes(value);
+}
+
+/** Index kinds this SDK declares (server storage keys; `index_type` values). */
+export type KnownIndexKind = 'hnsw' | 'pq' | 'ivf' | 'ivfpq' | 'spfresh' | 'fulltext';
+/** An index kind — a known value or any newer server string. */
+export type IndexKind = KnownIndexKind | (string & {});
+export const KNOWN_INDEX_KINDS: readonly KnownIndexKind[] = [
+  'hnsw',
+  'pq',
+  'ivf',
+  'ivfpq',
+  'spfresh',
+  'fulltext',
+];
+export function isKnownIndexKind(value: unknown): value is KnownIndexKind {
+  return (KNOWN_INDEX_KINDS as readonly unknown[]).includes(value);
+}
+
+/** Vector search modes this SDK declares (`DAKERA_SEARCH_MODE`; process-wide on the server). */
+export type KnownSearchMode = 'hybrid' | 'binary' | 'float' | 'scalar' | 'rabitq';
+/** A search mode — a known value or any newer server string. */
+export type SearchMode = KnownSearchMode | (string & {});
+export const KNOWN_SEARCH_MODES: readonly KnownSearchMode[] = [
+  'hybrid',
+  'binary',
+  'float',
+  'scalar',
+  'rabitq',
+];
+export function isKnownSearchMode(value: unknown): value is KnownSearchMode {
+  return (KNOWN_SEARCH_MODES as readonly unknown[]).includes(value);
+}
+
+/** Record representation kinds this SDK declares (R2 records surface). */
+export type KnownRepresentationKind = 'dense' | 'token_multivector' | 'patch_multivector';
+/** A representation kind — a known value or any newer server string. */
+export type RepresentationKind = KnownRepresentationKind | (string & {});
+export const KNOWN_REPRESENTATION_KINDS: readonly KnownRepresentationKind[] = [
+  'dense',
+  'token_multivector',
+  'patch_multivector',
+];
+export function isKnownRepresentationKind(value: unknown): value is KnownRepresentationKind {
+  return (KNOWN_REPRESENTATION_KINDS as readonly unknown[]).includes(value);
+}
+
+/** Record block dtypes this SDK declares (`store_as` encodings). */
+export type KnownBlockDType = 'f32' | 'f16' | 'i8';
+/** A block dtype — a known value or any newer server string. */
+export type BlockDType = KnownBlockDType | (string & {});
+export const KNOWN_BLOCK_DTYPES: readonly KnownBlockDType[] = ['f32', 'f16', 'i8'];
+export function isKnownBlockDType(value: unknown): value is KnownBlockDType {
+  return (KNOWN_BLOCK_DTYPES as readonly unknown[]).includes(value);
+}
 
 /** Configuration for bounded staleness reads */
 export interface StalenessConfig {
@@ -343,6 +417,16 @@ export interface ClientOptions {
   /** Base URL of the dakera-ode sidecar (e.g. `"http://localhost:8080"`).
    *  Required to call {@link DakeraClient.extractEntities}. */
   odeUrl?: string;
+  /**
+   * R9: validate the requested embedding model, index kind and distance metric
+   * against `GET /v1/capabilities` *before* sending a request, throwing
+   * `UnsupportedCapabilityError` that names what the server supports.
+   * Capabilities are fetched lazily on first use and cached (see
+   * {@link DakeraClient.capabilities}); a server that predates the endpoint
+   * (404) disables the check silently. When `false` (default) the check still
+   * runs whenever capabilities have already been fetched through `capabilities()`.
+   */
+  preflight?: boolean;
 }
 
 // =============================================================================
@@ -350,14 +434,43 @@ export interface ClientOptions {
 // =============================================================================
 
 /**
- * Supported embedding models for text-based operations.
+ * Embedding models this SDK declares for text-based operations.
+ * - bge-large: BGE-large - Best quality, server default (1024 dimensions)
  * - minilm: MiniLM-L6 - Fast, good quality (384 dimensions)
  * - bge-small: BGE-small - Balanced performance (384 dimensions)
  * - e5-small: E5-small - High quality (384 dimensions)
  * - modernbert-embed-base: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
  * - gte-modernbert-base: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
+ * - bge-m3: BGE-M3 multilingual - 1024 dimensions, 8192-token window (server v0.12+)
+ *
+ * The list the *server* supports is authoritative — read it from
+ * {@link DakeraClient.capabilities}.
  */
-export type EmbeddingModel = 'bge-large' | 'minilm' | 'bge-small' | 'e5-small' | 'modernbert-embed-base' | 'gte-modernbert-base';
+export type KnownEmbeddingModel =
+  | 'bge-large'
+  | 'minilm'
+  | 'bge-small'
+  | 'e5-small'
+  | 'modernbert-embed-base'
+  | 'gte-modernbert-base'
+  | 'bge-m3';
+/**
+ * An embedding model — a known value or any newer server string (a newer
+ * server may return a model this SDK does not declare; that must not fail).
+ */
+export type EmbeddingModel = KnownEmbeddingModel | (string & {});
+export const KNOWN_EMBEDDING_MODELS: readonly KnownEmbeddingModel[] = [
+  'bge-large',
+  'minilm',
+  'bge-small',
+  'e5-small',
+  'modernbert-embed-base',
+  'gte-modernbert-base',
+  'bge-m3',
+];
+export function isKnownEmbeddingModel(value: unknown): value is KnownEmbeddingModel {
+  return (KNOWN_EMBEDDING_MODELS as readonly unknown[]).includes(value);
+}
 
 /**
  * Input for upserting a text document with automatic embedding.
@@ -624,7 +737,13 @@ export interface UpdateMemoryRequest {
  * Controls which retrieval index the server uses. `"auto"` (default) lets the
  * server pick the best strategy based on the query.
  */
-export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
+export type KnownRoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
+/** A routing mode — a known value or any newer server string. */
+export type RoutingMode = KnownRoutingMode | (string & {});
+export const KNOWN_ROUTING_MODES: readonly KnownRoutingMode[] = ['auto', 'vector', 'bm25', 'hybrid'];
+export function isKnownRoutingMode(value: unknown): value is KnownRoutingMode {
+  return (KNOWN_ROUTING_MODES as readonly unknown[]).includes(value);
+}
 
 /**
  * Fusion strategy for hybrid recall (CE-14).
@@ -633,7 +752,13 @@ export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
  * `"minmax"` (server default since v0.11.2) uses min-max score normalization;
  * `"rrf"` uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
  */
-export type FusionStrategy = 'rrf' | 'minmax';
+export type KnownFusionStrategy = 'rrf' | 'minmax';
+/** A fusion strategy — a known value or any newer server string. */
+export type FusionStrategy = KnownFusionStrategy | (string & {});
+export const KNOWN_FUSION_STRATEGIES: readonly KnownFusionStrategy[] = ['rrf', 'minmax'];
+export function isKnownFusionStrategy(value: unknown): value is KnownFusionStrategy {
+  return (KNOWN_FUSION_STRATEGIES as readonly unknown[]).includes(value);
+}
 
 export interface RecallRequest {
   /** Natural language query */

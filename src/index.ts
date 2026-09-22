@@ -24,6 +24,57 @@
 // Client
 export { DakeraClient } from './client';
 
+// R9: forward-compat wire enums (known unions + runtime guards)
+export {
+  KNOWN_DISTANCE_METRICS,
+  isKnownDistanceMetric,
+  KNOWN_EMBEDDING_MODELS,
+  isKnownEmbeddingModel,
+  KNOWN_INDEX_KINDS,
+  isKnownIndexKind,
+  KNOWN_SEARCH_MODES,
+  isKnownSearchMode,
+  KNOWN_REPRESENTATION_KINDS,
+  isKnownRepresentationKind,
+  KNOWN_BLOCK_DTYPES,
+  isKnownBlockDType,
+  KNOWN_ROUTING_MODES,
+  isKnownRoutingMode,
+  KNOWN_FUSION_STRATEGIES,
+  isKnownFusionStrategy,
+} from './types';
+export type {
+  KnownDistanceMetric,
+  KnownEmbeddingModel,
+  IndexKind,
+  KnownIndexKind,
+  SearchMode,
+  KnownSearchMode,
+  RepresentationKind,
+  KnownRepresentationKind,
+  BlockDType,
+  KnownBlockDType,
+  KnownRoutingMode,
+  KnownFusionStrategy,
+} from './types';
+
+// R9: GET /v1/capabilities
+export {
+  parseCapabilities,
+  parseAcceptedValues,
+  findModel,
+  activeModel,
+  supportedValues,
+  supportsCapability,
+  requireCapability,
+} from './capabilities';
+export type {
+  ServerCapabilities,
+  ModelCapability,
+  RecordCapabilities,
+  CapabilityKind,
+} from './capabilities';
+
 // Session helpers
 export { ChatMemorySession } from './session';
 export type { StoreOptions, RecallOptions } from './session';
@@ -347,6 +398,7 @@ export {
   ConnectionError,
   NotFoundError,
   ValidationError,
+  UnsupportedCapabilityError,
   RateLimitError,
   ServerError,
   AuthenticationError,

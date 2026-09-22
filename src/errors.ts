@@ -72,6 +72,39 @@ export class ValidationError extends DakeraError {
   }
 }
 
+/**
+ * Raised *before* a request is sent when the server's advertised capabilities
+ * (`GET /v1/capabilities`) do not include what was asked for (R9 / DAK-10004).
+ *
+ * `kind` names the registry (`model`, `index_kind`, `distance_metric`,
+ * `search_mode`, `query_language`), `requested` is the wire string that was
+ * rejected and `supported` is what the server does accept, so the message is
+ * actionable on its own.
+ */
+export class UnsupportedCapabilityError extends ValidationError {
+  public readonly kind: string;
+  public readonly requested: string;
+  public readonly supported: readonly string[];
+  public readonly serverVersion?: string;
+
+  constructor(kind: string, requested: string, supported: readonly string[], serverVersion?: string) {
+    const server = serverVersion ? `Dakera server v${serverVersion}` : 'this Dakera server';
+    const accepted = supported.length > 0 ? supported.join(', ') : '(none advertised)';
+    super(
+      `${kind} '${requested}' is not supported by ${server}; supported ${kind} values: ${accepted}`,
+      undefined,
+      undefined,
+      ErrorCode.INVALID_REQUEST
+    );
+    this.name = 'UnsupportedCapabilityError';
+    this.kind = kind;
+    this.requested = requested;
+    this.supported = [...supported];
+    this.serverVersion = serverVersion;
+    Object.setPrototypeOf(this, UnsupportedCapabilityError.prototype);
+  }
+}
+
 /** Raised when rate limit is exceeded */
 export class RateLimitError extends DakeraError {
   public readonly retryAfter?: number;
