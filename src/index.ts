@@ -73,6 +73,10 @@ export type {
   ModelCapability,
   RecordCapabilities,
   CapabilityKind,
+  ScoringCapabilities,
+  AttachmentCapabilities,
+  TranscriptionCapabilities,
+  VisionCapabilities,
 } from './capabilities';
 
 // Session helpers
@@ -389,6 +393,23 @@ export type {
   MigrateDimensionsResponse,
   DrainReembedRequest,
   DrainReembedResponse,
+  AttachmentBytes,
+  AttachmentDownload,
+  AttachmentEntry,
+  AttachmentJob,
+  AttachmentJobAccepted,
+  AttachmentJobRequest,
+  AttachmentListResponse,
+  AttachmentUploadResponse,
+  IndexImageRequest,
+  TranscribeRequest,
+  WaitForJobOptions,
+  WaitUntilReadyOptions,
+  RecordInput,
+  RecordUpsertResponse,
+  RecordView,
+  RepresentationInput,
+  RepresentationInfo,
 } from './types';
 
 // Errors
@@ -404,6 +425,9 @@ export {
   AuthenticationError,
   AuthorizationError,
   TimeoutError,
+  PayloadTooLargeError,
+  NotImplementedError,
+  ConflictError,
 } from './errors';
 
 // Integrations

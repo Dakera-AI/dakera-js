@@ -7,9 +7,12 @@
 import {
   AuthenticationError,
   AuthorizationError,
+  ConflictError,
   ConnectionError,
   ErrorCode,
   NotFoundError,
+  NotImplementedError,
+  PayloadTooLargeError,
   RateLimitError,
   ServerError,
   TimeoutError,
@@ -20,6 +23,9 @@ import { parseCapabilities, requireCapability } from './capabilities';
 import type { CapabilityKind, ServerCapabilities } from './capabilities';
 
 /** Map a raw server code string to a typed ErrorCode, defaulting to UNKNOWN. */
+/** Longest Retry-After (seconds) the retry loop will sleep for. */
+const MAX_RETRY_AFTER_SECONDS = 60;
+
 function parseErrorCode(raw: unknown): ErrorCode {
   if (typeof raw === 'string' && raw in ErrorCode) {
     return raw as ErrorCode;
@@ -237,6 +243,20 @@ import type {
   DrainReembedRequest,
   DrainReembedResponse,
   StaticCountResponse,
+  AttachmentBytes,
+  AttachmentDownload,
+  AttachmentEntry,
+  AttachmentJob,
+  AttachmentJobAccepted,
+  AttachmentListResponse,
+  AttachmentUploadResponse,
+  IndexImageRequest,
+  RecordInput,
+  RecordUpsertResponse,
+  RecordView,
+  TranscribeRequest,
+  WaitForJobOptions,
+  WaitUntilReadyOptions,
 } from './types';
 import { computeTifScore } from './types';
 
@@ -407,10 +427,11 @@ export class DakeraClient {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    opts?: { retry?: boolean; rawBody?: BodyInit; contentType?: string; asBytes?: boolean }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const { maxRetries } = this.retryConfig;
+    const maxRetries = opts?.retry === false ? 1 : this.retryConfig.maxRetries;
     // connectTimeout governs the initial connection phase; timeout governs the full request
     const connectMs = Math.min(this.connectTimeout, this.timeout);
     let lastError: Error | undefined;
@@ -425,14 +446,16 @@ export class DakeraClient {
 
         const response = await fetch(url, {
           method,
-          headers: this.headers,
-          body: body ? JSON.stringify(body) : undefined,
+          headers: opts?.contentType
+            ? { ...this.headers, 'Content-Type': opts.contentType }
+            : this.headers,
+          body: opts?.rawBody ?? (body ? JSON.stringify(body) : undefined),
           signal: controller.signal,
         });
 
         clearTimeout(timerId);
 
-        return await this.handleResponse<T>(response);
+        return await this.handleResponse<T>(response, opts?.asBytes);
       } catch (error) {
         if (error instanceof RateLimitError) {
           if (attempt === maxRetries - 1) throw error;
@@ -452,8 +475,17 @@ export class DakeraClient {
           ) {
             throw error;
           }
+          // 501 is a configuration answer (feature off / backend limit), not a
+          // transient failure: retrying cannot change it.
+          if (error.statusCode === 501) throw error;
           if (attempt === maxRetries - 1) throw error;
           lastError = error;
+          // v0.12: every 503 carries Retry-After (integer seconds). Wait what
+          // the server asked for instead of guessing with exponential backoff.
+          if (error.retryAfterSeconds != null) {
+            await this.sleep(Math.min(error.retryAfterSeconds, MAX_RETRY_AFTER_SECONDS) * 1000);
+            continue;
+          }
         } else if (error instanceof Error) {
           if (attempt === maxRetries - 1) {
             if (error.name === 'AbortError') {
@@ -483,7 +515,7 @@ export class DakeraClient {
   /**
    * Handle HTTP response and throw appropriate errors.
    */
-  private async handleResponse<T>(response: Response): Promise<T> {
+  private async handleResponse<T>(response: Response, asBytes = false): Promise<T> {
     // OPS-1: capture rate-limit headers before consuming the body
     this._lastRateLimitHeaders = {
       limit: this._parseHeaderInt(response.headers.get('X-RateLimit-Limit')),
@@ -496,8 +528,23 @@ export class DakeraClient {
     let body: unknown;
     const contentType = response.headers.get('content-type');
 
+    if (asBytes && response.ok) {
+      const etag = response.headers.get('etag');
+      return {
+        data: new Uint8Array(await response.arrayBuffer()),
+        content_type: contentType ?? 'application/octet-stream',
+        ...(etag ? { etag: etag.replace(/^W\//, '').replace(/^"|"$/g, '') } : {}),
+      } as T;
+    }
+
     if (contentType?.includes('application/json')) {
-      body = await response.json();
+      // Every v0.12 error is JSON, but a proxy in front may still answer with
+      // a malformed body: never let a parse failure hide the status code.
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
     } else if (response.status !== 204) {
       body = await response.text();
     }
@@ -519,18 +566,54 @@ export class DakeraClient {
         : undefined
     );
 
+    const err = this.buildHttpError(response, body, errorMessage, code);
+    throw err;
+  }
+
+  private buildHttpError(
+    response: Response,
+    body: unknown,
+    errorMessage: string,
+    code: ErrorCode
+  ): DakeraError {
+    const err = this.mapStatusToError(response, body, errorMessage, code);
+    if (typeof body === 'object' && body !== null) {
+      const { details, resource } = body as { details?: unknown; resource?: unknown };
+      if (typeof details === 'string') err.details = details;
+      if (typeof resource === 'string') err.resource = resource;
+    }
+    const ra = response.headers.get('Retry-After');
+    if (ra !== null) {
+      const secs = parseInt(ra, 10);
+      if (!isNaN(secs) && secs >= 0) err.retryAfterSeconds = secs;
+    }
+    return err;
+  }
+
+  private mapStatusToError(
+    response: Response,
+    body: unknown,
+    errorMessage: string,
+    code: ErrorCode
+  ): DakeraError {
     switch (response.status) {
       case 400:
-        throw new ValidationError(errorMessage, response.status, body, code);
+        return new ValidationError(errorMessage, response.status, body, code);
       case 401:
-        throw new AuthenticationError('Authentication failed', response.status, body, code);
+        return new AuthenticationError('Authentication failed', response.status, body, code);
       case 403:
-        throw new AuthorizationError(errorMessage, response.status, body, code);
+        return new AuthorizationError(errorMessage, response.status, body, code);
       case 404:
-        throw new NotFoundError(errorMessage, response.status, body, code);
+        return new NotFoundError(errorMessage, response.status, body, code);
+      case 409:
+        return new ConflictError(errorMessage, response.status, body, code);
+      case 413:
+        return new PayloadTooLargeError(errorMessage, response.status, body, code);
+      case 501:
+        return new NotImplementedError(errorMessage, response.status, body, code);
       case 429: {
         const retryAfter = response.headers.get('Retry-After');
-        throw new RateLimitError(
+        return new RateLimitError(
           'Rate limit exceeded',
           response.status,
           body,
@@ -540,9 +623,9 @@ export class DakeraClient {
       }
       default:
         if (response.status >= 500) {
-          throw new ServerError(errorMessage, response.status, body, code);
+          return new ServerError(errorMessage, response.status, body, code);
         }
-        throw new DakeraError(errorMessage, response.status, body, code);
+        return new DakeraError(errorMessage, response.status, body, code);
     }
   }
 
@@ -967,9 +1050,57 @@ export class DakeraClient {
     return this.request<HealthResponse>('GET', '/health');
   }
 
-  /** K8s readiness probe — checks storage and dependencies. */
+  /**
+   * K8s readiness probe — checks storage and dependencies.
+   *
+   * v0.12 servers bind the port while models load and answer
+   * `503 {"ready": false, "starting": true, ...}` with `Retry-After`; that is
+   * "not ready", never "healthy". This method returns the body of such an
+   * answer (`ready: false`) instead of throwing and does not retry; use
+   * {@link waitUntilReady} to wait. Connection failures still throw.
+   */
   async healthReady(): Promise<ReadinessResponse> {
-    return this.request<ReadinessResponse>('GET', '/health/ready');
+    try {
+      return await this.request<ReadinessResponse>('GET', '/health/ready', undefined, { retry: false });
+    } catch (error) {
+      if (
+        error instanceof DakeraError &&
+        error.statusCode === 503 &&
+        typeof error.responseBody === 'object' &&
+        error.responseBody !== null &&
+        (error.responseBody as { ready?: unknown }).ready === false
+      ) {
+        return error.responseBody as ReadinessResponse;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Poll `/health/ready` until the server reports `ready: true` (a 503 or a
+   * refused connection while it starts counts as "not yet", not as healthy).
+   *
+   * @throws TimeoutError when the server is still not ready after `timeoutMs`.
+   */
+  async waitUntilReady(options: WaitUntilReadyOptions = {}): Promise<ReadinessResponse> {
+    const intervalMs = options.intervalMs ?? 1000;
+    const timeoutMs = options.timeoutMs ?? 120000;
+    const deadline = Date.now() + timeoutMs;
+    let last: string;
+    for (;;) {
+      try {
+        const ready = await this.healthReady();
+        if (ready.ready) return ready;
+        last = ready.reason ?? (ready.starting ? 'starting' : 'not ready');
+      } catch (error) {
+        if (error instanceof AuthenticationError || error instanceof AuthorizationError) throw error;
+        last = error instanceof Error ? error.message : String(error);
+      }
+      if (Date.now() + intervalMs > deadline) {
+        throw new TimeoutError(`Server not ready after ${timeoutMs}ms (${last})`);
+      }
+      await this.sleep(intervalMs);
+    }
   }
 
   /** K8s liveness probe — checks process is alive. */
@@ -1577,7 +1708,7 @@ export class DakeraClient {
    * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
    * @returns RecallResponse with `memories` and optionally `associated_memories` (each with `depth` field)
    */
-  async recall(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecallResponse> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
@@ -1590,6 +1721,7 @@ export class DakeraClient {
     if (options?.until !== undefined) body['until'] = options.until;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
+    if (options?.lang !== undefined) body['lang'] = options.lang;
     const raw = await this.request<{ memories: Array<unknown>; associated_memories?: Array<unknown> }>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
     return {
       memories: (raw.memories ?? []).map(flattenRecalledMemory),
@@ -1673,14 +1805,186 @@ export class DakeraClient {
     return this.request<BatchStoreMemoryResponse>('POST', '/v1/memories/store/batch', request);
   }
 
+  // ===========================================================================
+  // Attachments, transcription, image indexing, records (server v0.12.0)
+  //
+  // Opt-in on the server (DAKERA_ATTACHMENTS / DAKERA_VISION / DAKERA_RECORDS);
+  // a server with the feature off answers 501 FEATURE_DISABLED, which these
+  // methods surface as NotImplementedError (`isFeatureDisabled`, `details`
+  // names the variable). `client.capabilities()` reports what is on.
+  // ===========================================================================
+
+  private attachmentsPath(namespace: string): string {
+    return `/v1/namespaces/${encodeURIComponent(namespace)}/attachments`;
+  }
+
+  /**
+   * Upload an attachment to a namespace (`POST /v1/namespaces/{ns}/attachments`).
+   *
+   * Content-addressed: the same bytes uploaded twice return the same
+   * `attachment_ref` with `created: false`. Over `DAKERA_ATTACHMENT_MAX_BYTES`
+   * (default 25 MiB) the server answers 413 (PayloadTooLargeError).
+   *
+   * @param contentType - media type of the bytes (a Blob's own `type` is used when omitted)
+   */
+  async uploadAttachment(
+    namespace: string,
+    data: AttachmentBytes,
+    contentType?: string,
+  ): Promise<AttachmentUploadResponse> {
+    const type =
+      contentType ?? (typeof Blob !== 'undefined' && data instanceof Blob && data.type ? data.type : 'application/octet-stream');
+    return this.request<AttachmentUploadResponse>('POST', this.attachmentsPath(namespace), undefined, {
+      rawBody: data as BodyInit,
+      contentType: type,
+    });
+  }
+
+  /** List a namespace's attachments (no bytes). */
+  async listAttachments(namespace: string): Promise<AttachmentEntry[]> {
+    const resp = await this.request<AttachmentListResponse>('GET', this.attachmentsPath(namespace));
+    return resp.attachments ?? [];
+  }
+
+  /** Download an attachment's bytes and the media type it was uploaded with. */
+  async downloadAttachment(namespace: string, attachmentRef: string): Promise<AttachmentDownload> {
+    return this.request<AttachmentDownload>(
+      'GET',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}`,
+      undefined,
+      { asBytes: true },
+    );
+  }
+
+  /**
+   * Delete an attachment. A memory that still references it makes the server
+   * answer 409 (ConflictError): forget the memory instead.
+   */
+  async deleteAttachment(namespace: string, attachmentRef: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}`,
+    );
+  }
+
+  /**
+   * Start a speech-to-text job on a WAV attachment
+   * (`POST .../attachments/{ref}/transcribe`, 202). The transcript becomes a
+   * memory of `request.agent_id`. Poll with {@link getTranscriptionJob} or
+   * {@link waitForAttachmentJob}.
+   */
+  async transcribeAttachment(
+    namespace: string,
+    attachmentRef: string,
+    request: TranscribeRequest,
+  ): Promise<AttachmentJobAccepted> {
+    return this.request<AttachmentJobAccepted>(
+      'POST',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}/transcribe`,
+      request,
+    );
+  }
+
+  /** Status of a transcription job. Jobs live in server memory: after a restart this is a 404 JOB_NOT_FOUND; look up `memory_id` instead. */
+  async getTranscriptionJob(namespace: string, attachmentRef: string, jobId: string): Promise<AttachmentJob> {
+    return this.request<AttachmentJob>(
+      'GET',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}/transcribe/${encodeURIComponent(jobId)}`,
+    );
+  }
+
+  /**
+   * Start an image-indexing job on a PNG attachment
+   * (`POST .../attachments/{ref}/index`, 202; needs `DAKERA_VISION` and
+   * `DAKERA_ATTACHMENTS`).
+   */
+  async indexImageAttachment(
+    namespace: string,
+    attachmentRef: string,
+    request: IndexImageRequest,
+  ): Promise<AttachmentJobAccepted> {
+    return this.request<AttachmentJobAccepted>(
+      'POST',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}/index`,
+      request,
+    );
+  }
+
+  /** Status of an image-index job. */
+  async getImageIndexJob(namespace: string, attachmentRef: string, jobId: string): Promise<AttachmentJob> {
+    return this.request<AttachmentJob>(
+      'GET',
+      `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}/index/${encodeURIComponent(jobId)}`,
+    );
+  }
+
+  /**
+   * Poll an attachment job (`accepted.status_url`) until it is `Completed`.
+   *
+   * @throws DakeraError when the job `Failed` or was `Cancelled` (`details` carries the job's error code), TimeoutError past `timeoutMs`.
+   */
+  async waitForAttachmentJob(
+    accepted: AttachmentJobAccepted,
+    options: WaitForJobOptions = {},
+  ): Promise<AttachmentJob> {
+    const intervalMs = options.intervalMs ?? 1000;
+    const timeoutMs = options.timeoutMs ?? 600000;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const job = await this.request<AttachmentJob>('GET', accepted.status_url);
+      if (job.status === 'Completed') return job;
+      if (job.status === 'Failed' || job.status === 'Cancelled') {
+        const err = new DakeraError(
+          `Job ${job.id} ${job.status.toLowerCase()}: ${job.message ?? 'no message'}`,
+          job.error?.status,
+          job,
+          parseErrorCode(job.error?.code),
+        );
+        err.details = job.message;
+        throw err;
+      }
+      if (Date.now() + intervalMs > deadline) {
+        throw new TimeoutError(`Job ${job.id} still ${job.status} (${job.progress}%) after ${timeoutMs}ms`);
+      }
+      await this.sleep(intervalMs);
+    }
+  }
+
+  /**
+   * Write records — one primary vector each plus named extra representations
+   * (`POST /v1/namespaces/{ns}/records`; needs `DAKERA_RECORDS`). A record
+   * over the size limits is a 413 (PayloadTooLargeError, code PAYLOAD_TOO_LARGE).
+   */
+  async upsertRecords(namespace: string, records: RecordInput[]): Promise<RecordUpsertResponse> {
+    return this.request<RecordUpsertResponse>(
+      'POST',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/records`,
+      { records },
+    );
+  }
+
+  /**
+   * Read a record back: a manifest of its representations, and the vectors
+   * only with `includeVectors`. There is no record delete route: delete the id
+   * with {@link delete}.
+   */
+  async getRecord(namespace: string, id: string, includeVectors = false): Promise<RecordView> {
+    const q = includeVectors ? '?include_vectors=true' : '';
+    return this.request<RecordView>(
+      'GET',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/records/${encodeURIComponent(id)}${q}`,
+    );
+  }
+
   /** Search memories for an agent */
-  async searchMemories(agentId: string, query: string, options?: { top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecalledMemory[]> {
+  async searchMemories(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecalledMemory[]> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
     if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
+    if (options?.lang !== undefined) body['lang'] = options.lang;
     const result = await this.request<{ memories: Array<unknown> } | Array<unknown>>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
     const items: Array<unknown> = (result as any).memories ?? result;
@@ -1888,6 +2192,25 @@ export class DakeraClient {
     return this.request<NamespaceEntityConfig>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/config`);
   }
 
+  /**
+   * Replace a namespace's entity-extraction config (`PUT /v1/namespaces/{ns}/config`, server v0.12+).
+   *
+   * Unlike {@link configureNamespaceNer} (PATCH, which MERGES: omitted
+   * `entity_types` keeps the configured list), PUT is a full replacement: an
+   * omitted or empty `entity_types` CLEARS the list. Use this to clear it.
+   * Requires a v0.12 server (v0.11 answers 405).
+   */
+  async replaceNamespaceEntityConfig(
+    namespace: string,
+    config: NamespaceNerConfig,
+  ): Promise<NamespaceEntityConfig> {
+    return this.request<NamespaceEntityConfig>(
+      'PUT',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/config`,
+      { extract_entities: config.extract_entities, entity_types: config.entity_types ?? [] },
+    );
+  }
+
   /** Get the extractor provider configuration for a namespace. */
   async getNamespaceExtractor(namespace: string): Promise<ExtractorConfig> {
     return this.request<ExtractorConfig>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/extractor`);
@@ -1908,7 +2231,7 @@ export class DakeraClient {
   ): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(
       'PATCH',
-      `/v1/namespaces/${namespace}/config`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/config`,
       config,
     );
   }
@@ -1918,6 +2241,7 @@ export class DakeraClient {
    *
    * @param text - Text to extract entities from
    * @param entityTypes - Entity types to extract (defaults to server defaults)
+   * @param options.lang - v0.12: language of `text` for the rule-based date rules (400 if unsupported)
    * @returns EntityExtractionResponse with extracted entities
    *
    * @note Requires CE-4 (GLiNER) on the server.
@@ -1925,11 +2249,13 @@ export class DakeraClient {
   async extractEntities(
     text: string,
     entityTypes?: string[],
+    options?: { lang?: string },
   ): Promise<EntityExtractionResponse> {
     const body: Record<string, unknown> = { content: text };
     if (entityTypes !== undefined) {
       body['entity_types'] = entityTypes;
     }
+    if (options?.lang !== undefined) body['lang'] = options.lang;
     return this.request<EntityExtractionResponse>('POST', '/v1/memories/extract', body);
   }
 

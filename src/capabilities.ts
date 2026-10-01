@@ -51,6 +51,51 @@ export interface RecordCapabilities {
   raw: Record<string, unknown>;
 }
 
+/** The scoring axis and late-interaction lane (`capabilities.scoring`). */
+export interface ScoringCapabilities {
+  /** `DAKERA_SCORING_STRATEGY` as configured (`single-vector` unless set). */
+  strategy: string;
+  /** Prose list of accepted strategies, as the server sends it. */
+  strategies_accepted: string;
+  /** Whether the late-interaction (MaxSim) lane is on. */
+  late_interaction_enabled: boolean;
+  /** Whether the active model has a late-interaction recipe (e.g. `colbert-small`). */
+  late_interaction_model_supported: boolean;
+  /** `text` or `visual`. */
+  late_interaction_lane: string;
+  raw: Record<string, unknown>;
+}
+
+/** The speech-to-text surface (`capabilities.attachments.transcription`). */
+export interface TranscriptionCapabilities {
+  model: string;
+  models: string[];
+  media_types: string[];
+  languages: string[];
+  sample_rate_hz: number;
+}
+
+/** The attachment lane (`capabilities.attachments`). */
+export interface AttachmentCapabilities {
+  /** Whether the attachment routes answer (else 501 FEATURE_DISABLED). */
+  enabled: boolean;
+  /** Largest upload in bytes (`DAKERA_ATTACHMENT_MAX_BYTES`); over it: 413. */
+  max_bytes: number;
+  transcription: TranscriptionCapabilities;
+  raw: Record<string, unknown>;
+}
+
+/** The visual lane (`capabilities.vision`). */
+export interface VisionCapabilities {
+  /** Whether `.../attachments/{ref}/index` answers (`DAKERA_VISION`). */
+  enabled: boolean;
+  model: string;
+  models: string[];
+  media_types: string[];
+  dimension: number;
+  raw: Record<string, unknown>;
+}
+
 /** The capabilities document. */
 export interface ServerCapabilities {
   capabilities_version: number;
@@ -69,6 +114,14 @@ export interface ServerCapabilities {
   fulltext_language: string;
   on_disk_format_version: number;
   records: RecordCapabilities;
+  /** v0.12: scoring strategy and late-interaction lane (empty defaults on older servers). */
+  scoring: ScoringCapabilities;
+  /** v0.12: attachment / transcription lane. */
+  attachments: AttachmentCapabilities;
+  /** v0.12: visual (image indexing) lane. */
+  vision: VisionCapabilities;
+  /** Records this node skipped because a newer Dakera wrote them. */
+  unreadable_records: number;
   query_languages: string[];
   /** A model change was acknowledged but the store is not fully re-embedded yet. */
   reembed_pending: boolean;
@@ -159,6 +212,48 @@ function parseRecords(raw: unknown): RecordCapabilities {
   };
 }
 
+function parseScoring(raw: unknown): ScoringCapabilities {
+  const r = isRecord(raw) ? raw : {};
+  const li = isRecord(r.late_interaction) ? r.late_interaction : {};
+  return {
+    strategy: text(r.strategy, 'single-vector'),
+    strategies_accepted: text(r.strategies_accepted),
+    late_interaction_enabled: li.enabled === true,
+    late_interaction_model_supported: li.model_supported === true,
+    late_interaction_lane: text(li.lane, 'text'),
+    raw: r,
+  };
+}
+
+function parseAttachments(raw: unknown): AttachmentCapabilities {
+  const r = isRecord(raw) ? raw : {};
+  const t = isRecord(r.transcription) ? r.transcription : {};
+  return {
+    enabled: r.enabled === true,
+    max_bytes: integer(r.max_bytes),
+    transcription: {
+      model: text(t.model),
+      models: stringList(t.models),
+      media_types: stringList(t.media_types),
+      languages: stringList(t.languages),
+      sample_rate_hz: integer(t.sample_rate_hz),
+    },
+    raw: r,
+  };
+}
+
+function parseVision(raw: unknown): VisionCapabilities {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    enabled: r.enabled === true,
+    model: text(r.model),
+    models: stringList(r.models),
+    media_types: stringList(r.media_types),
+    dimension: integer(r.dimension),
+    raw: r,
+  };
+}
+
 /**
  * Runtime guard for a capabilities document: tolerates unknown fields, unknown
  * strings inside lists, missing fields and non-object input (→ empty document).
@@ -180,6 +275,10 @@ export function parseCapabilities(raw: unknown): ServerCapabilities {
     fulltext_language: text(doc.fulltext_language, 'en'),
     on_disk_format_version: integer(doc.on_disk_format_version),
     records: parseRecords(doc.records),
+    scoring: parseScoring(doc.scoring),
+    attachments: parseAttachments(doc.attachments),
+    vision: parseVision(doc.vision),
+    unreadable_records: integer(doc.unreadable_records),
     query_languages: stringList(doc.query_languages),
     reembed_pending: doc.reembed_pending === true,
     raw: doc,

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0] - 2026-09-22
+## [0.12.0] - 2026-10-01
 
 ### Added
 
@@ -38,6 +38,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preflight: true })` fetches lazily on first use and degrades silently on a pre-0.12 server
   (404). `client.requireSupported(kind, value)` exposes the same check for `search_mode` and
   `query_language`.
+
+- **Server v0.12.0 support** (compatible with v0.11.108 and v0.12.0 servers; operator guide:
+  `docs/v0.12/UPGRADE.md` in the server repo):
+  - `healthReady()` returns the body of a starting server's `503` (`ready: false`, `starting`,
+    `reason`) instead of throwing or retrying; new `waitUntilReady({ intervalMs, timeoutMs })`
+    polls `/health/ready` and never treats a 503 as healthy.
+  - Retry logic honours `Retry-After` (integer seconds, capped at 60 s) on 503 and 429; 501 is never
+    retried. `DakeraError` gains `details`, `resource` (404: what was not found) and
+    `retryAfterSeconds`.
+  - New error classes `PayloadTooLargeError` (413; `isQuota` tells `QUOTA_EXCEEDED` from
+    `PAYLOAD_TOO_LARGE`), `NotImplementedError` (501; `isFeatureDisabled` for `FEATURE_DISABLED`) and
+    `ConflictError` (409); new `ErrorCode` members (`PAYLOAD_TOO_LARGE`, `FEATURE_DISABLED`,
+    `NOT_IMPLEMENTED`, `JOB_NOT_FOUND`, `CONFLICT`, `QUERY_TIMEOUT`, ...). A malformed JSON error
+    body no longer hides the HTTP status.
+  - Attachments: `uploadAttachment`, `listAttachments`, `downloadAttachment`, `deleteAttachment`,
+    `transcribeAttachment` / `getTranscriptionJob`, `indexImageAttachment` / `getImageIndexJob`,
+    `waitForAttachmentJob`; `attachment_ref` on `StoreMemoryRequest` and batch items.
+  - Records: `upsertRecords` / `getRecord` with named representations (`RecordInput`,
+    `RepresentationInput`, `RecordView`).
+  - Per-request `lang` on `storeMemory`, `storeMemoriesBatch`, `updateMemory`, `recall`,
+    `searchMemories`, `extractEntities` and the attachment job requests.
+  - `replaceNamespaceEntityConfig()` (`PUT /v1/namespaces/{ns}/config`) clears `entity_types`, which
+    the merging `PATCH` (`configureNamespaceNer`) no longer can (server TRACKER K34).
+  - `ServerCapabilities` gains `scoring`, `attachments`, `vision` and `unreadable_records`.
 
 ### Changed
 

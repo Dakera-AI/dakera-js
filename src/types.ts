@@ -650,6 +650,20 @@ export interface StoreMemoryRequest {
    * Used by temporal recall queries (server v0.11.98+, DAK-7424).
    */
   valid_from?: number;
+  /**
+   * v0.12: language of `content` (ISO 639-1 code, English or native name,
+   * optionally with a region such as `pt-BR`). Selects the parsing of content
+   * dates and rule-based entities and is recorded on the memory. Omitted: the
+   * server-wide `DAKERA_QUERY_LANG` (default English). Unsupported: 400.
+   * `GET /v1/capabilities` lists `query_languages`.
+   */
+  lang?: string;
+  /**
+   * v0.12: `sha256:<hex>` reference of an attachment already uploaded to this
+   * agent's namespace (`_dakera_agent_{agent_id}`). Needs `DAKERA_ATTACHMENTS`
+   * on the server (else 501 FEATURE_DISABLED); an unknown reference is a 404.
+   */
+  attachment_ref?: string;
 }
 
 /** A stored memory */
@@ -728,6 +742,8 @@ export interface UpdateMemoryRequest {
   metadata?: Record<string, unknown>;
   /** Updated type */
   memory_type?: MemoryType;
+  /** v0.12: language of the content (see {@link StoreMemoryRequest.lang}). */
+  lang?: string;
 }
 
 /** Request to recall memories */
@@ -789,6 +805,12 @@ export interface RecallRequest {
   iterations?: number;
   /** v0.11.0: session-adjacent memory enrichment (±5 min). Default: `undefined` (server uses `true`). Pass `false` to disable on latency-sensitive paths. */
   neighborhood?: boolean;
+  /**
+   * v0.12: language of `query` for rule-based routing and temporal expressions
+   * (`"when", "how long ago"`). Does not translate or filter. Omitted: the
+   * server-wide `DAKERA_QUERY_LANG`. Unsupported: 400.
+   */
+  lang?: string;
 }
 
 /** Request to update importance */
@@ -1831,6 +1853,8 @@ export interface BatchStoreMemoryItem {
   expires_at?: number;
   /** Optional custom ID. Auto-generated if not provided. */
   id?: string;
+  /** v0.12: `sha256:<hex>` attachment reference (see {@link StoreMemoryRequest.attachment_ref}). */
+  attachment_ref?: string;
 }
 
 /**
@@ -1845,6 +1869,8 @@ export interface BatchStoreMemoryRequest {
   agent_id: string;
   /** Memories to store (1–1000 items). */
   memories: BatchStoreMemoryItem[];
+  /** v0.12: language of the batch's contents; applies to every item. */
+  lang?: string;
 }
 
 /** A single stored memory returned in a {@link BatchStoreMemoryResponse}. */
@@ -2480,7 +2506,14 @@ export interface FulltextReindexResponse {
 export interface ReadinessResponse {
   ready: boolean;
   version: string;
-  checks: Record<string, { status: string; message?: string }>;
+  /** Storage / embedding engine / tiered engine checks. Absent while the server is starting. */
+  checks?: Record<string, { status: string; message?: string }>;
+  /** v0.12: `true` while the server has bound its port but is still loading models. */
+  starting?: boolean;
+  /** v0.12: why the server is not ready yet (only while `starting`). */
+  reason?: string;
+  /** v0.12: model downloads in progress (only while `starting`). */
+  downloads?: unknown;
 }
 
 /** Response from GET /health/live. */
@@ -2798,6 +2831,7 @@ export interface UpdateBackupScheduleRequest {
 export interface JobInfo {
   id: string;
   job_type: string;
+  /** `Pending` | `Running` | `Completed` | `Failed` | `Cancelled` */
   status: string;
   created_at: number;
   started_at?: number;
@@ -2805,6 +2839,8 @@ export interface JobInfo {
   progress: number;
   message?: string;
   metadata: Record<string, string>;
+  /** v0.12: why a `Failed` job failed (HTTP status and error code). */
+  error?: { status: number; code: string };
 }
 
 /** System diagnostics. */
@@ -3122,4 +3158,157 @@ export function tifScoreFromMetadata(data: Record<string, unknown>): TifScore {
   const falsity = Number(data['falsity'] ?? 0);
   const feedbackCount = Number(data['feedback_count'] ?? 0);
   return { truth, indeterminacy, falsity, feedbackCount, classification: classifyTif(truth, indeterminacy, falsity) };
+}
+
+// =============================================================================
+// Server v0.12.0 — attachments, transcription, image indexing, records
+// =============================================================================
+
+/** One attachment of a namespace (`GET /v1/namespaces/{ns}/attachments`). */
+export interface AttachmentEntry {
+  /** `sha256:<hex of the bytes>` — what a memory's `attachment_ref` carries. */
+  attachment_ref: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+/** Response of `POST /v1/namespaces/{ns}/attachments` (201 new, 200 already held). */
+export interface AttachmentUploadResponse extends AttachmentEntry {
+  /** `false` when the namespace already held these bytes (the upload was a no-op). */
+  created: boolean;
+}
+
+/** Response of `GET /v1/namespaces/{ns}/attachments`. */
+export interface AttachmentListResponse {
+  attachments: AttachmentEntry[];
+}
+
+/** Bytes of an attachment, with the media type it was uploaded with. */
+export interface AttachmentDownload {
+  data: Uint8Array;
+  content_type: string;
+  /** The ETag (the hash), without quotes, when the server sent one. */
+  etag?: string;
+}
+
+/** Input accepted as attachment bytes by `uploadAttachment`. */
+export type AttachmentBytes = Uint8Array | ArrayBuffer | Blob;
+
+/**
+ * Body of `POST .../attachments/{ref}/transcribe` and `.../index`: the memory
+ * the result becomes. Same fields and defaults as a memory store, minus the
+ * content (that is the transcript / caption).
+ */
+export interface AttachmentJobRequest {
+  /** The agent whose memory the job stores (required). */
+  agent_id: string;
+  /** Custom memory id; else one is derived deterministically from the request. */
+  id?: string;
+  memory_type?: MemoryType;
+  session_id?: string;
+  importance?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+  expires_at?: number;
+  /** Language of the transcript / caption for write-time derivations. */
+  lang?: string;
+}
+
+/** Body of `POST .../attachments/{ref}/transcribe` (WAV audio; English-only model). */
+export type TranscribeRequest = AttachmentJobRequest;
+
+/** Body of `POST .../attachments/{ref}/index` (PNG image; needs `DAKERA_VISION`). */
+export interface IndexImageRequest extends AttachmentJobRequest {
+  /** Caption stored as the memory text (default `[image sha256:...]`); not what is embedded. */
+  content?: string;
+}
+
+/** The 202 body of the transcribe and image-index routes. */
+export interface AttachmentJobAccepted {
+  job_id: string;
+  attachment_ref: string;
+  agent_id: string;
+  /** The memory the job stores; look it up with this id after a server restart. */
+  memory_id: string;
+  /** Wire name of the model the job runs. */
+  model: string;
+  /** Route to poll (`GET`). */
+  status_url: string;
+}
+
+/** Status of a transcription / image-index job. Jobs live in server memory. */
+export type AttachmentJob = JobInfo;
+
+/** Options for `waitForAttachmentJob`. */
+export interface WaitForJobOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms (default 600000). */
+  timeoutMs?: number;
+}
+
+/** Options for `waitUntilReady`. */
+export interface WaitUntilReadyOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms (default 120000). */
+  timeoutMs?: number;
+}
+
+/** One extra representation of a record on the write path (`POST .../records`). */
+export interface RepresentationInput {
+  /** Slot name, unique within the record; never `"dense"`; `colbert.fde` / `patch.fde` are server-derived. */
+  name: string;
+  /** `dense` | `token_multivector` | `patch_multivector` (default `dense`). */
+  kind?: RepresentationKind;
+  /** Registry name of the model that produced the vectors; empty = the namespace default. */
+  model?: string;
+  /** The vectors, row-major; every row the same non-zero length. */
+  vectors: number[][];
+  /** On-disk packing: `f32` (lossless, default), `f16` or `i8`. */
+  store_as?: BlockDType;
+}
+
+/** One record on the write path: one primary vector plus named representations. */
+export interface RecordInput {
+  id: string;
+  /** The primary dense vector — the one that is indexed and searched. */
+  values: number[];
+  representations?: RepresentationInput[];
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+}
+
+/** Response of `POST /v1/namespaces/{ns}/records`. */
+export interface RecordUpsertResponse {
+  upserted_count: number;
+}
+
+/** What a record carries in one slot (`GET .../records/{id}`). */
+export interface RepresentationInfo {
+  name: string;
+  kind: RepresentationKind;
+  model?: string;
+  dim: number;
+  count: number;
+  dtype: BlockDType;
+  /** Packed size on disk. */
+  bytes: number;
+  /** Decoded rows — only with `includeVectors`. */
+  vectors?: number[][];
+}
+
+/** Response of `GET /v1/namespaces/{ns}/records/{id}`. */
+export interface RecordView {
+  id: string;
+  /** The primary vector — only with `includeVectors`. */
+  values?: number[];
+  dimension: number;
+  representations?: RepresentationInfo[];
+  /** Slots written by a newer server that this one skipped. */
+  unsupported_representations?: number;
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+  expires_at?: number;
 }
