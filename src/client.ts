@@ -148,10 +148,13 @@ import type {
   DecayStatsResponse,
   KpiSnapshot,
   OpsStats,
-  EdgeType,
   GraphExport,
   GraphLinkResponse,
   GraphPath,
+  MemoryLinkOptions,
+  GraphEdge,
+  GraphNode,
+  ExtractedEntity,
   MemoryGraph,
   MemoryGraphOptions,
   NamespaceNerConfig,
@@ -259,13 +262,39 @@ import type {
 } from './types';
 import { computeTifScore } from './types';
 
+/**
+ * A graph edge as the server sends it (`from_id`, `to_id`, ...), with the
+ * older names (`source_id`, `target_id`, `id`) filled in as well.
+ */
+function normalizeGraphEdge(raw: unknown): GraphEdge {
+  const e = (raw ?? {}) as Record<string, unknown>;
+  const from = String(e['from_id'] ?? e['source_id'] ?? '');
+  const to = String(e['to_id'] ?? e['target_id'] ?? '');
+  return {
+    ...e,
+    from_id: from,
+    to_id: to,
+    source_id: from,
+    target_id: to,
+    id: typeof e['id'] === 'string' ? e['id'] : '',
+    edge_type: (e['edge_type'] ?? 'linked_by') as GraphEdge['edge_type'],
+    weight: typeof e['weight'] === 'number' ? e['weight'] : 0,
+    created_at: typeof e['created_at'] === 'number' ? e['created_at'] : 0,
+  } as GraphEdge;
+}
+
+function normalizeGraphEdges(raw: unknown): GraphEdge[] {
+  return Array.isArray(raw) ? raw.map(normalizeGraphEdge) : [];
+}
+
+
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
 /** SDK version, kept in sync with package.json. Used for the default User-Agent. */
-const SDK_VERSION = '0.12.0';
+const SDK_VERSION = '0.12.1';
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -1683,7 +1712,7 @@ export class DakeraClient {
    * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
    * @returns RecallResponse with `memories` and optionally `associated_memories` (each with `depth` field)
    */
-  async recall(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean; tags?: string[] }): Promise<RecallResponse> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
@@ -1697,6 +1726,7 @@ export class DakeraClient {
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
     if (options?.lang !== undefined) body['lang'] = options.lang;
+    if (options?.tags !== undefined) body['tags'] = options.tags;
     const raw = await this.request<{ memories: Array<unknown>; associated_memories?: Array<unknown> }>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
     return {
       memories: (raw.memories ?? []).map(flattenRecalledMemory),
@@ -1960,7 +1990,7 @@ export class DakeraClient {
   }
 
   /** Search memories for an agent */
-  async searchMemories(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean }): Promise<RecalledMemory[]> {
+  async searchMemories(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean; tags?: string[] }): Promise<RecalledMemory[]> {
     const body: Record<string, unknown> = { query };
     if (options?.top_k !== undefined) body['top_k'] = options.top_k;
     if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
@@ -1968,6 +1998,7 @@ export class DakeraClient {
     if (options?.routing !== undefined) body['routing'] = options.routing;
     if (options?.rerank !== undefined) body['rerank'] = options.rerank;
     if (options?.lang !== undefined) body['lang'] = options.lang;
+    if (options?.tags !== undefined) body['tags'] = options.tags;
     const result = await this.request<{ memories: Array<unknown> } | Array<unknown>>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
     const items: Array<unknown> = (result as any).memories ?? result;
@@ -2099,71 +2130,136 @@ export class DakeraClient {
   // ===========================================================================
 
   /**
-   * Traverse the knowledge graph from a memory node.
+   * Traverse the knowledge graph from a memory node
+   * (`GET /v1/memories/{id}/graph`).
    *
-   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   * Requires CE-5 (Memory Knowledge Graph) on the server. The server finds the
+   * memory's agent itself; each node carries the edges that reached it, and
+   * `edges` collects them all.
    *
    * @param memoryId  Root memory ID to start traversal from.
-   * @param options   `depth` (default 1, max 3) and optional `types` filter.
+   * @param options   `depth` (default 1) and an optional `types` filter
+   *   (applied client-side: the route has no type filter).
    *
    * @example
-   * const graph = await client.memories.graph(memoryId, { depth: 2 });
+   * const graph = await client.memoryGraph(memoryId, { depth: 2 });
    * console.log(`${graph.nodes.length} nodes, ${graph.edges.length} edges`);
    */
   async memoryGraph(memoryId: string, options?: MemoryGraphOptions): Promise<MemoryGraph> {
     const params = new URLSearchParams();
     params.set('depth', String(options?.depth ?? 1));
-    if (options?.types?.length) {
-      params.set('types', options.types.join(','));
-    }
-    return this.request<MemoryGraph>('GET', `/v1/memories/${memoryId}/graph?${params}`);
+    const raw = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/memories/${encodeURIComponent(memoryId)}/graph?${params}`,
+    );
+    const keep = options?.types?.length ? new Set<string>(options.types) : undefined;
+    const nodes: GraphNode[] = (Array.isArray(raw['nodes']) ? raw['nodes'] : []).map((n: unknown) => {
+      const node = (n ?? {}) as Record<string, unknown>;
+      const edges = normalizeGraphEdges(node['edges']).filter((e) => !keep || keep.has(e.edge_type));
+      return { ...node, memory_id: String(node['memory_id'] ?? ''), depth: Number(node['depth'] ?? 0), edges } as GraphNode;
+    });
+    return {
+      ...raw,
+      root_id: String(raw['root_id'] ?? memoryId),
+      depth: Number(raw['depth'] ?? 0),
+      node_count: Number(raw['node_count'] ?? nodes.length),
+      nodes,
+      edges: nodes.flatMap((n) => n.edges),
+    } as MemoryGraph;
   }
 
   /**
-   * Find the shortest path between two memories in the knowledge graph.
+   * Find the shortest path between two memories in the knowledge graph
+   * (`GET /v1/memories/{id}/path?to=...`).
    *
    * Requires CE-5 (Memory Knowledge Graph) on the server.
    *
    * @param sourceId  Starting memory ID.
    * @param targetId  Destination memory ID.
+   * @throws {@link NotFoundError} when no path exists.
    */
   async memoryPath(sourceId: string, targetId: string): Promise<GraphPath> {
-    return this.request<GraphPath>('GET', `/v1/memories/${sourceId}/path?target=${encodeURIComponent(targetId)}`);
+    const raw = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/memories/${encodeURIComponent(sourceId)}/path?to=${encodeURIComponent(targetId)}`,
+    );
+    const fromId = String(raw['from_id'] ?? raw['source_id'] ?? sourceId);
+    const toId = String(raw['to_id'] ?? raw['target_id'] ?? targetId);
+    const path = Array.isArray(raw['path']) ? (raw['path'] as string[]) : [];
+    const hopCount = Number(raw['hop_count'] ?? raw['hops'] ?? Math.max(path.length - 1, 0));
+    return {
+      ...raw,
+      from_id: fromId,
+      to_id: toId,
+      path,
+      hop_count: hopCount,
+      source_id: fromId,
+      target_id: toId,
+      hops: hopCount,
+    } as GraphPath;
   }
 
   /**
-   * Create an explicit edge between two memories.
+   * Create an explicit edge between two memories of one agent
+   * (`POST /v1/memories/{id}/links`).
    *
-   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   * Requires CE-5 (Memory Knowledge Graph) on the server. Both memories must
+   * belong to `options.agentId`; the server records the edge as `linked_by`.
    *
    * @param sourceId  Source memory ID.
    * @param targetId  Target memory ID.
-   * @param edgeType  Edge type — must be `"linked_by"` for explicit links.
+   * @param options   `agentId` (required) and an optional `label`.
+   *
+   * @example
+   * await client.memoryLink(m1, m2, { agentId: 'my-agent' });
    */
   async memoryLink(
     sourceId: string,
     targetId: string,
-    edgeType: EdgeType = 'linked_by',
+    options: MemoryLinkOptions,
   ): Promise<GraphLinkResponse> {
-    return this.request<GraphLinkResponse>('POST', `/v1/memories/${sourceId}/links`, {
-      target_id: targetId,
-      edge_type: edgeType,
-    });
+    if (typeof options !== 'object' || options === null || typeof options.agentId !== 'string' || options.agentId === '') {
+      throw new TypeError(
+        'memoryLink(sourceId, targetId, { agentId }) needs the agent that owns both memories; ' +
+          'the server rejects links without agent_id and always records them as linked_by ' +
+          '(the old third edgeType argument is gone)',
+      );
+    }
+    const body: Record<string, unknown> = { target_id: targetId, agent_id: options.agentId };
+    if (options.label !== undefined) body['label'] = options.label;
+    const raw = await this.request<Record<string, unknown>>(
+      'POST',
+      `/v1/memories/${encodeURIComponent(sourceId)}/links`,
+      body,
+    );
+    if (raw['edge'] && typeof raw['edge'] === 'object') {
+      const edge = normalizeGraphEdge(raw['edge']);
+      return { ...raw, from_id: edge.from_id, to_id: edge.to_id, edge_type: edge.edge_type, edge } as GraphLinkResponse;
+    }
+    const edge = normalizeGraphEdge({ weight: 1.0, ...raw });
+    return { ...raw, from_id: edge.from_id, to_id: edge.to_id, edge_type: edge.edge_type, edge } as GraphLinkResponse;
   }
 
   /**
-   * Export the full knowledge graph for an agent.
+   * Export the full knowledge graph for an agent
+   * (`GET /v1/agents/{id}/graph/export`).
    *
-   * Requires CE-5 (Memory Knowledge Graph) on the server.
+   * Requires CE-5 (Memory Knowledge Graph) on the server. The route always
+   * answers JSON (`format` is not sent: the server ignores it); for GraphML use
+   * {@link DakeraClient.knowledgeExport}.
    *
    * @param agentId  Agent whose graph to export.
-   * @param format   Export format — `"json"` (default), `"graphml"`, or `"csv"`.
+   * @param _format  Ignored; kept so existing calls compile.
    */
   async agentGraphExport(
     agentId: string,
-    format: 'json' | 'graphml' | 'csv' = 'json',
+    _format: 'json' | 'graphml' | 'csv' = 'json',
   ): Promise<GraphExport> {
-    return this.request<GraphExport>('GET', `/v1/agents/${agentId}/graph/export?format=${format}`);
+    const raw = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/agents/${encodeURIComponent(agentId)}/graph/export`,
+    );
+    return { ...raw, edges: normalizeGraphEdges(raw['edges']) } as GraphExport;
   }
 
   // =========================================================================
@@ -2251,7 +2347,17 @@ export class DakeraClient {
    * @note Requires CE-4 (GLiNER) on the server.
    */
   async memoryEntities(memoryId: string): Promise<MemoryEntitiesResponse> {
-    return this.request<MemoryEntitiesResponse>('GET', `/v1/memory/entities/${memoryId}`);
+    const raw = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/memory/entities/${encodeURIComponent(memoryId)}`,
+    );
+    const entities = Array.isArray(raw['entities']) ? (raw['entities'] as ExtractedEntity[]) : [];
+    return {
+      ...raw,
+      memory_id: typeof raw['memory_id'] === 'string' ? raw['memory_id'] : memoryId,
+      entities,
+      count: typeof raw['count'] === 'number' ? raw['count'] : entities.length,
+    } as MemoryEntitiesResponse;
   }
 
   // ===========================================================================
@@ -2408,7 +2514,8 @@ export class DakeraClient {
     if (options?.minWeight != null) params.set('min_weight', String(options.minWeight));
     if (options?.maxDepth != null) params.set('max_depth', String(options.maxDepth));
     if (options?.limit != null) params.set('limit', String(options.limit));
-    return this.request<KgQueryResponse>('GET', `/v1/knowledge/query?${params}`);
+    const raw = await this.request<KgQueryResponse>('GET', `/v1/knowledge/query?${params}`);
+    return { ...raw, edges: normalizeGraphEdges(raw.edges) };
   }
 
   /**
@@ -2444,7 +2551,10 @@ export class DakeraClient {
    */
   async knowledgeExport(agentId: string, format = 'json'): Promise<KgExportResponse> {
     const params = new URLSearchParams({ agent_id: agentId, format });
-    return this.request<KgExportResponse>('GET', `/v1/knowledge/export?${params}`);
+    const raw = await this.request<KgExportResponse>('GET', `/v1/knowledge/export?${params}`);
+    return raw && typeof raw === 'object' && 'edges' in raw
+      ? { ...raw, edges: normalizeGraphEdges(raw.edges) }
+      : raw;
   }
 
   /**

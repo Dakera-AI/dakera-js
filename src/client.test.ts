@@ -1071,141 +1071,166 @@ describe('DakeraClient', () => {
   // =========================================================================
 
   describe('Memory Knowledge Graph API (SDK-9)', () => {
+    // Shapes the v0.12.0 (and v0.11.108) server answers, probed live.
+    const SERVER_EDGE = {
+      from_id: 'mem-abc',
+      to_id: 'mem-def',
+      edge_type: 'related_to' as const,
+      weight: 0.92,
+      created_at: 1774000000,
+    };
     const GRAPH_RESPONSE = {
       root_id: 'mem-abc',
       depth: 2,
+      node_count: 3,
       nodes: [
-        { memory_id: 'mem-abc', content_preview: 'Root memory', importance: 0.9, depth: 0 },
-        { memory_id: 'mem-def', content_preview: 'Related memory', importance: 0.7, depth: 1 },
-      ],
-      edges: [
+        { memory_id: 'mem-abc', depth: 0, edges: [] },
+        { memory_id: 'mem-def', depth: 1, edges: [SERVER_EDGE] },
         {
-          id: 'edge-1',
-          source_id: 'mem-abc',
-          target_id: 'mem-def',
-          edge_type: 'related_to' as const,
-          weight: 0.92,
-          created_at: 1774000000,
+          memory_id: 'mem-ghi',
+          depth: 2,
+          edges: [{ from_id: 'mem-def', to_id: 'mem-ghi', edge_type: 'linked_by', weight: 1.0, created_at: 1774000100 }],
         },
       ],
     };
 
     const PATH_RESPONSE = {
-      source_id: 'mem-abc',
-      target_id: 'mem-ghi',
+      from_id: 'mem-abc',
+      to_id: 'mem-ghi',
       path: ['mem-abc', 'mem-def', 'mem-ghi'],
-      hops: 2,
-      edges: [],
+      hop_count: 2,
     };
 
-    const LINK_RESPONSE = {
-      edge: {
-        id: 'edge-new',
-        source_id: 'mem-abc',
-        target_id: 'mem-xyz',
-        edge_type: 'linked_by' as const,
-        weight: 1.0,
-        created_at: 1774002000,
-      },
-    };
+    const LINK_RESPONSE = { from_id: 'mem-abc', to_id: 'mem-xyz', edge_type: 'linked_by' };
 
     const EXPORT_RESPONSE = {
       agent_id: 'test-agent',
-      format: 'json' as const,
-      data: '{"nodes":[],"edges":[]}',
-      node_count: 10,
-      edge_count: 7,
+      namespace: '_dakera_agent_test-agent',
+      node_count: 2,
+      edge_count: 1,
+      edges: [SERVER_EDGE],
     };
 
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
     it('memoryGraph calls GET /v1/memories/{id}/graph with default depth=1', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(GRAPH_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
+      mockFetch.mockResolvedValueOnce(json(GRAPH_RESPONSE));
       const result = await client.memoryGraph('mem-abc');
       expect(result.root_id).toBe('mem-abc');
-      expect(result.nodes).toHaveLength(2);
-      expect(result.edges).toHaveLength(1);
+      expect(result.node_count).toBe(3);
+      expect(result.nodes).toHaveLength(3);
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/memories/mem-abc/graph');
       expect(url).toContain('depth=1');
     });
 
-    it('memoryGraph passes custom depth and type filters', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(GRAPH_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
-      await client.memoryGraph('mem-abc', { depth: 3, types: ['related_to', 'linked_by'] });
+    it('memoryGraph collects the per-node edges and fills the old field names', async () => {
+      mockFetch.mockResolvedValueOnce(json(GRAPH_RESPONSE));
+      const result = await client.memoryGraph('mem-abc', { depth: 2 });
+      expect(result.edges).toHaveLength(2);
+      const e = result.nodes[1].edges[0];
+      expect(e.from_id).toBe('mem-abc');
+      expect(e.to_id).toBe('mem-def');
+      expect(e.source_id).toBe('mem-abc');
+      expect(e.target_id).toBe('mem-def');
+      expect(e.id).toBe('');
+      expect(e.weight).toBe(0.92);
+      expect(e.created_at).toBe(1774000000);
+    });
+
+    it('memoryGraph applies the types filter client-side (the route has none)', async () => {
+      mockFetch.mockResolvedValueOnce(json(GRAPH_RESPONSE));
+      const result = await client.memoryGraph('mem-abc', { depth: 3, types: ['linked_by'] });
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('depth=3');
-      expect(url).toContain('related_to');
-    });
-
-    it('memoryGraph omits types param when not specified', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(GRAPH_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
-      await client.memoryGraph('mem-abc');
-      const [url] = mockFetch.mock.calls[0];
       expect(url).not.toContain('types=');
+      expect(result.nodes).toHaveLength(3);
+      expect(result.edges).toHaveLength(1);
+      expect(result.edges[0].edge_type).toBe('linked_by');
+      expect(result.nodes[1].edges).toHaveLength(0);
     });
 
-    it('memoryPath calls GET /v1/memories/{id}/path with target param', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(PATH_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
+    it('memoryPath calls GET /v1/memories/{id}/path with the `to` param', async () => {
+      mockFetch.mockResolvedValueOnce(json(PATH_RESPONSE));
       const result = await client.memoryPath('mem-abc', 'mem-ghi');
       expect(result.path).toEqual(['mem-abc', 'mem-def', 'mem-ghi']);
+      expect(result.hop_count).toBe(2);
       expect(result.hops).toBe(2);
+      expect(result.from_id).toBe('mem-abc');
+      expect(result.source_id).toBe('mem-abc');
+      expect(result.to_id).toBe('mem-ghi');
+      expect(result.target_id).toBe('mem-ghi');
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/memories/mem-abc/path');
-      expect(url).toContain('target=mem-ghi');
+      const u = new URL(url as string);
+      expect(u.pathname).toBe('/v1/memories/mem-abc/path');
+      expect(u.searchParams.get('to')).toBe('mem-ghi');
+      expect(u.searchParams.has('target')).toBe(false);
     });
 
-    it('memoryLink calls POST /v1/memories/{id}/links with default linked_by', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(LINK_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
-      const result = await client.memoryLink('mem-abc', 'mem-xyz');
-      expect(result.edge.id).toBe('edge-new');
+    it('memoryLink sends target_id and agent_id and builds the edge from the flat answer', async () => {
+      mockFetch.mockResolvedValueOnce(json(LINK_RESPONSE));
+      const result = await client.memoryLink('mem-abc', 'mem-xyz', { agentId: 'agent-1' });
+      expect(result.from_id).toBe('mem-abc');
+      expect(result.to_id).toBe('mem-xyz');
+      expect(result.edge_type).toBe('linked_by');
+      expect(result.edge.source_id).toBe('mem-abc');
+      expect(result.edge.target_id).toBe('mem-xyz');
       expect(result.edge.edge_type).toBe('linked_by');
+      expect(result.edge.weight).toBe(1.0);
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/memories/mem-abc/links');
-      const body = JSON.parse(opts.body as string);
-      expect(body.target_id).toBe('mem-xyz');
-      expect(body.edge_type).toBe('linked_by');
+      expect(opts.method).toBe('POST');
+      expect(JSON.parse(opts.body as string)).toEqual({ target_id: 'mem-xyz', agent_id: 'agent-1' });
     });
 
-    it('memoryLink accepts custom edge type', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(LINK_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
-      await client.memoryLink('mem-abc', 'mem-xyz', 'precedes');
+    it('memoryLink sends the optional label', async () => {
+      mockFetch.mockResolvedValueOnce(json(LINK_RESPONSE));
+      await client.memoryLink('mem-abc', 'mem-xyz', { agentId: 'agent-1', label: 'see also' });
       const [, opts] = mockFetch.mock.calls[0];
-      const body = JSON.parse(opts.body as string);
-      expect(body.edge_type).toBe('precedes');
+      expect(JSON.parse(opts.body as string)).toEqual({
+        target_id: 'mem-xyz',
+        agent_id: 'agent-1',
+        label: 'see also',
+      });
     });
 
-    it('agentGraphExport calls GET /v1/agents/{id}/graph/export with default json', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify(EXPORT_RESPONSE), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
+    it('memoryLink rejects the old edgeType call and a missing agentId before any request', async () => {
+      await expect(client.memoryLink('mem-abc', 'mem-xyz', 'precedes' as any)).rejects.toThrow(TypeError);
+      await expect((client as any).memoryLink('mem-abc', 'mem-xyz')).rejects.toThrow(/agentId/);
+      await expect(client.memoryLink('mem-abc', 'mem-xyz', { agentId: '' })).rejects.toThrow(TypeError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('agentGraphExport calls GET /v1/agents/{id}/graph/export and normalizes edges', async () => {
+      mockFetch.mockResolvedValueOnce(json(EXPORT_RESPONSE));
       const result = await client.agentGraphExport('test-agent');
       expect(result.agent_id).toBe('test-agent');
-      expect(result.format).toBe('json');
-      expect(result.node_count).toBe(10);
+      expect(result.namespace).toBe('_dakera_agent_test-agent');
+      expect(result.node_count).toBe(2);
+      expect(result.edge_count).toBe(1);
+      expect(result.edges[0].source_id).toBe('mem-abc');
+      expect(result.edges[0].to_id).toBe('mem-def');
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/agents/test-agent/graph/export');
-      expect(url).toContain('format=json');
     });
 
-    it('agentGraphExport passes graphml format', async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify({ ...EXPORT_RESPONSE, format: 'graphml' }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
-      );
-      const result = await client.agentGraphExport('test-agent', 'graphml');
-      expect(result.format).toBe('graphml');
+    it('agentGraphExport does not send the format the server ignores', async () => {
+      mockFetch.mockResolvedValueOnce(json(EXPORT_RESPONSE));
+      await client.agentGraphExport('test-agent', 'graphml');
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('format=graphml');
+      expect(url).not.toContain('format=');
+    });
+
+    it('knowledgeQuery normalizes the edges of the server answer', async () => {
+      mockFetch.mockResolvedValueOnce(
+        json({ agent_id: 'agent-1', node_count: 2, edge_count: 1, edges: [SERVER_EDGE] }),
+      );
+      const result = await client.knowledgeQuery('agent-1');
+      expect(result.edge_count).toBe(1);
+      expect(result.edges[0].from_id).toBe('mem-abc');
+      expect(result.edges[0].source_id).toBe('mem-abc');
+      expect(result.edges[0].target_id).toBe('mem-def');
     });
   });
 
@@ -1353,18 +1378,20 @@ describe('DakeraClient', () => {
       expect(body.entity_types).toEqual(['person', 'location']);
     });
 
-    it('memoryEntities calls GET /v1/memory/entities/:id and parses response', async () => {
+    it('memoryEntities calls GET /v1/memory/entities/:id and fills memory_id', async () => {
+      // The server answers {entities, count} without memory_id.
       const mockResponse = {
-        memory_id: 'mem-xyz',
         entities: [
           { entity_type: 'person', value: 'Bob', score: 0.91 },
         ],
+        count: 1,
       };
       mockFetch.mockResolvedValueOnce(
         new Response(JSON.stringify(mockResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
       );
       const result = await client.memoryEntities('mem-xyz');
       expect(result.memory_id).toBe('mem-xyz');
+      expect(result.count).toBe(1);
       expect(result.entities).toHaveLength(1);
       expect(result.entities[0].value).toBe('Bob');
       const [url, opts] = mockFetch.mock.calls[0];

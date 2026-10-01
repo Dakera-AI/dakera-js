@@ -255,6 +255,80 @@ describeIntegration("Knowledge Graph", () => {
   });
 });
 
+describeIntegration("Knowledge graph contract (link, graph, path, export, query, entities)", () => {
+  const agent = `integ-kg-${crypto.randomUUID().slice(0, 8)}`;
+  let m1 = "";
+  let m2 = "";
+
+  beforeAll(async () => {
+    if (skip) return;
+    m1 = (await client.storeMemory(agent, { content: "Anna lives in Berlin and works at Siemens" })).memory.id;
+    m2 = (await client.storeMemory(agent, { content: "Bob met Anna in Paris last spring" })).memory.id;
+  });
+
+  it("updates a memory (agent_id in the query string)", async () => {
+    const updated = await client.updateMemory(agent, m2, { content: "Bob met Anna in Paris last summer" });
+    expect(updated).toBeDefined();
+    const got = await client.getMemory(agent, m2);
+    expect(JSON.stringify(got)).toContain("last summer");
+  });
+
+  it("links two memories with agentId and returns the edge", async () => {
+    const link = await client.memoryLink(m1, m2, { agentId: agent, label: "integration" });
+    expect(link.from_id).toBe(m1);
+    expect(link.to_id).toBe(m2);
+    expect(link.edge_type).toBe("linked_by");
+    expect(link.edge.source_id).toBe(m1);
+    expect(link.edge.target_id).toBe(m2);
+  });
+
+  it("traverses the graph from the first memory", async () => {
+    const graph = await client.memoryGraph(m1, { depth: 2 });
+    expect(graph.root_id).toBe(m1);
+    expect(graph.node_count).toBe(graph.nodes.length);
+    const ids = graph.nodes.map((n) => n.memory_id);
+    expect(ids).toContain(m2);
+    const linked = graph.edges.find((e) => e.edge_type === "linked_by" && e.to_id === m2);
+    expect(linked).toBeDefined();
+    expect(linked?.from_id).toBe(m1);
+    expect(linked?.source_id).toBe(m1);
+    expect(linked?.weight).toBe(1);
+    expect(linked?.created_at).toBeGreaterThan(0);
+  });
+
+  it("finds the path between them", async () => {
+    const path = await client.memoryPath(m1, m2);
+    expect(path.path[0]).toBe(m1);
+    expect(path.path[path.path.length - 1]).toBe(m2);
+    expect(path.hop_count).toBe(path.path.length - 1);
+    expect(path.hops).toBe(path.hop_count);
+    expect(path.from_id).toBe(m1);
+    expect(path.to_id).toBe(m2);
+  });
+
+  it("exports the agent graph", async () => {
+    const exp = await client.agentGraphExport(agent);
+    expect(exp.agent_id).toBe(agent);
+    expect(exp.namespace).toBe(`_dakera_agent_${agent}`);
+    expect(exp.edge_count).toBeGreaterThanOrEqual(1);
+    expect(exp.edges.some((e) => e.source_id === m1 && e.target_id === m2)).toBe(true);
+  });
+
+  it("queries the knowledge graph", async () => {
+    const q = await client.knowledgeQuery(agent, { edgeType: "linked_by" });
+    expect(q.agent_id).toBe(agent);
+    expect(q.edge_count).toBe(q.edges.length);
+    expect(q.edges.some((e) => e.from_id === m1 && e.target_id === m2)).toBe(true);
+  });
+
+  it("reads a memory's entities", async () => {
+    const ents = await client.memoryEntities(m1);
+    expect(ents.memory_id).toBe(m1);
+    expect(Array.isArray(ents.entities)).toBe(true);
+    expect(ents.count).toBe(ents.entities.length);
+  });
+});
+
 describeIntegration("Consolidate", () => {
   it("consolidates similar memories", async () => {
     for (let i = 0; i < 3; i++) {

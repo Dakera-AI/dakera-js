@@ -43,7 +43,7 @@ function makeMockClient(): DakeraClient {
     storeMemory: vi.fn().mockResolvedValue({ memory: { id: 'mem-1', content: '', memory_type: 'episodic', importance: 0.5 }, embedding_time_ms: 5 }),
     batchRecall: vi.fn().mockResolvedValue(makeBatchRecallResponse([])),
     batchForget: vi.fn().mockResolvedValue({ deleted_count: 0 } satisfies BatchForgetResponse),
-    memoryLink: vi.fn().mockResolvedValue({ edge: null }),
+    memoryLink: vi.fn().mockResolvedValue({ from_id: '', to_id: '', edge_type: 'linked_by', edge: null }),
     knowledgeQuery: vi.fn().mockResolvedValue({ agent_id: 'ag-1', node_count: 0, edge_count: 0, edges: [] } satisfies KgQueryResponse),
   } as unknown as DakeraClient;
 }
@@ -549,24 +549,26 @@ describe('DakeraDecisionStore.isTerminal', () => {
 // ---------------------------------------------------------------------------
 
 describe('DakeraDelegationHelper.linkDelegation', () => {
-  it('calls memoryLink with correct args', async () => {
+  it('calls memoryLink with the agent the server requires', async () => {
     const client = makeMockClient();
     const helper = new DakeraDelegationHelper(client);
 
-    await helper.linkDelegation({ childId: 'child-mem', parentId: 'parent-mem' });
+    await helper.linkDelegation({ agentId: 'ag-1', childId: 'child-mem', parentId: 'parent-mem' });
 
     expect(client.memoryLink).toHaveBeenCalledOnce();
-    const [sourceId, targetId, edgeType] = (client.memoryLink as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [sourceId, targetId, options] = (client.memoryLink as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(sourceId).toBe('child-mem');
     expect(targetId).toBe('parent-mem');
-    expect(edgeType).toBe('delegated_from');
+    expect(options).toEqual({ agentId: 'ag-1', label: 'delegated_from' });
   });
 });
 
 describe('DakeraDelegationHelper.getDelegationChain', () => {
   function makeKgResponse(root: string, hops: string[]): KgQueryResponse {
     const edges = hops.map((hop, i) => ({
-      id: `edge-${i}`,
+      id: '',
+      from_id: i === 0 ? root : hops[i - 1],
+      to_id: hop,
       source_id: i === 0 ? root : hops[i - 1],
       target_id: hop,
       edge_type: 'linked_by' as const,
@@ -588,6 +590,17 @@ describe('DakeraDelegationHelper.getDelegationChain', () => {
     expect(chain[0]).toBe('root');
     expect(chain).toContain('parent');
     expect(chain).toContain('grandparent');
+  });
+
+  it('queries the explicit (linked_by) edges, the only type links are stored as', async () => {
+    const client = makeMockClient();
+    const helper = new DakeraDelegationHelper(client);
+
+    await helper.getDelegationChain('ag-1', 'root', 3);
+
+    const opts = (client.knowledgeQuery as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect((opts as Record<string, unknown>)['edgeType']).toBe('linked_by');
+    expect((opts as Record<string, unknown>)['rootId']).toBe('root');
   });
 
   it('max_depth is clamped to 5', async () => {
@@ -616,8 +629,8 @@ describe('DakeraDelegationHelper.getDelegationChain', () => {
       node_count: 2,
       edge_count: 2,
       edges: [
-        { id: 'e1', source_id: 'root', target_id: 'child', edge_type: 'linked_by', weight: 1, created_at: 0 },
-        { id: 'e2', source_id: 'root', target_id: 'child', edge_type: 'linked_by', weight: 1, created_at: 0 },
+        { id: '', from_id: 'root', to_id: 'child', source_id: 'root', target_id: 'child', edge_type: 'linked_by', weight: 1, created_at: 0 },
+        { id: '', from_id: 'root', to_id: 'child', source_id: 'root', target_id: 'child', edge_type: 'linked_by', weight: 1, created_at: 0 },
       ],
     } satisfies KgQueryResponse);
     const helper = new DakeraDelegationHelper(client);

@@ -348,6 +348,35 @@ describe('server v0.12.0', () => {
     });
   });
 
+  describe('recall / search tags and the agent_id query', () => {
+    it('sends tags with recall and searchMemories, and omits them when not given', async () => {
+      mockFetch.mockResolvedValueOnce(json(200, { memories: [] }));
+      await client.recall('a', 'q', { tags: ['work', 'urgent'] });
+      expect(JSON.parse(lastCall().init.body as string)).toMatchObject({ agent_id: 'a', tags: ['work', 'urgent'] });
+
+      mockFetch.mockResolvedValueOnce(json(200, { memories: [] }));
+      await client.searchMemories('a', 'q', { tags: ['home'] });
+      expect(JSON.parse(lastCall().init.body as string)).toMatchObject({ agent_id: 'a', tags: ['home'] });
+
+      mockFetch.mockResolvedValueOnce(json(200, { memories: [] }));
+      await client.recall('a', 'q');
+      expect(JSON.parse(lastCall().init.body as string)).not.toHaveProperty('tags');
+    });
+
+    it('getMemory and updateMemory put agent_id in the query string', async () => {
+      // The server reads agent_id from the query (400 "missing field agent_id" otherwise).
+      mockFetch.mockResolvedValueOnce(json(200, { id: 'm', content: 'x' }));
+      await client.getMemory('agent 7', 'm');
+      expect(new URL(lastCall().url).searchParams.get('agent_id')).toBe('agent 7');
+
+      mockFetch.mockResolvedValueOnce(json(200, { id: 'm', content: 'y' }));
+      await client.updateMemory('agent 7', 'm', { content: 'y' });
+      const u = new URL(lastCall().url);
+      expect(u.pathname).toBe('/v1/memory/update/m');
+      expect(u.searchParams.get('agent_id')).toBe('agent 7');
+    });
+  });
+
   describe('per-request lang', () => {
     it('is sent by recall, searchMemories, extractEntities and batch store', async () => {
       mockFetch.mockResolvedValueOnce(json(200, { memories: [] }));

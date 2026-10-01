@@ -92,7 +92,7 @@ async function main() {
     });
     m2Id = m2.memory.id;
 
-    await client.memoryLink(m1Id, m2Id, 'related_to');
+    await client.memoryLink(m1Id, m2Id, { agentId });
 
     const graph = await client.memoryGraph(m1Id, { depth: 2 });
     console.log(`Graph nodes: ${graph.nodes.length}, edges: ${graph.edges.length}`);

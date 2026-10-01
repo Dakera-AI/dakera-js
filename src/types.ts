@@ -1904,19 +1904,30 @@ export interface BatchStoreMemoryResponse {
  */
 export type EdgeType = 'related_to' | 'shares_entity' | 'precedes' | 'linked_by';
 
-/** A directed edge in the memory knowledge graph. */
+/**
+ * A directed edge in the memory knowledge graph.
+ *
+ * The server sends `from_id`, `to_id`, `edge_type`, `weight` and `created_at`
+ * (no edge id). The client also fills `source_id` / `target_id` (same values
+ * as `from_id` / `to_id`) and `id` (`''`: the server has no edge ids) so code
+ * written against the older field names keeps working.
+ */
 export interface GraphEdge {
-  /** Unique edge identifier. */
-  id: string;
-  /** Source memory ID. */
+  /** Source memory ID, as the server names it. */
+  from_id: string;
+  /** Target memory ID, as the server names it. */
+  to_id: string;
+  /** Source memory ID (same as `from_id`). */
   source_id: string;
-  /** Target memory ID. */
+  /** Target memory ID (same as `to_id`). */
   target_id: string;
+  /** Always `''`: the server does not identify edges. */
+  id: string;
   /** Relationship type between the two memories. */
   edge_type: EdgeType;
-  /** Edge weight (0.0–1.0). For `related_to` this is the cosine similarity score. */
+  /** Edge weight (0.0–1.0). For `related_to` this is the cosine similarity score; 1.0 for explicit links. */
   weight: number;
-  /** Unix timestamp of edge creation. */
+  /** Unix timestamp (seconds) of edge creation; 0 when the server did not say. */
   created_at: number;
 }
 
@@ -1924,12 +1935,14 @@ export interface GraphEdge {
 export interface GraphNode {
   /** Memory identifier. */
   memory_id: string;
-  /** First 200 characters of memory content. */
-  content_preview: string;
-  /** Memory importance score. */
-  importance: number;
   /** Traversal depth from the root node (root = 0). */
   depth: number;
+  /** Edges that reached this node during the traversal (empty for the root). */
+  edges: GraphEdge[];
+  /** Not sent by the server (v0.11.108 / v0.12); kept for older code. */
+  content_preview?: string;
+  /** Not sent by the server (v0.11.108 / v0.12); kept for older code. */
+  importance?: number;
 }
 
 /** Graph traversal result from `GET /v1/memories/{id}/graph`. */
@@ -1938,44 +1951,67 @@ export interface MemoryGraph {
   root_id: string;
   /** Maximum traversal depth used. */
   depth: number;
+  /** Number of nodes returned. */
+  node_count: number;
   /** All memory nodes reachable within the requested depth. */
   nodes: GraphNode[];
-  /** All edges connecting the returned nodes. */
+  /** Every node's edges, collected by the client (the server lists them per node). */
   edges: GraphEdge[];
 }
 
 /** Shortest path result from `GET /v1/memories/{id}/path`. */
 export interface GraphPath {
   /** Starting memory ID. */
-  source_id: string;
+  from_id: string;
   /** Destination memory ID. */
-  target_id: string;
+  to_id: string;
   /** Ordered list of memory IDs from source to target (inclusive). */
   path: string[];
-  /** Number of edges traversed (`path.length - 1`). -1 if no path exists. */
+  /** Number of edges traversed (`path.length - 1`). */
+  hop_count: number;
+  /** Starting memory ID (same as `from_id`). */
+  source_id: string;
+  /** Destination memory ID (same as `to_id`). */
+  target_id: string;
+  /** Same as `hop_count`. */
   hops: number;
-  /** Edges along the path, in traversal order. */
-  edges: GraphEdge[];
 }
 
 /** Response from `POST /v1/memories/{id}/links`. */
 export interface GraphLinkResponse {
-  /** The newly created edge. */
+  /** Source memory ID. */
+  from_id: string;
+  /** Target memory ID. */
+  to_id: string;
+  /** Always `linked_by`: the server records explicit links with that type. */
+  edge_type: EdgeType;
+  /**
+   * The created edge, built by the client from the answer (weight 1.0, as the
+   * server stores explicit links; `created_at` 0 because the answer omits it).
+   */
   edge: GraphEdge;
+}
+
+/** Options for {@link DakeraClient.memoryLink}. */
+export interface MemoryLinkOptions {
+  /** Agent that owns both memories (required by the server). */
+  agentId: string;
+  /** Optional human-readable label. */
+  label?: string;
 }
 
 /** Agent graph export from `GET /v1/agents/{id}/graph/export`. */
 export interface GraphExport {
   /** Agent whose graph was exported. */
   agent_id: string;
-  /** Export format: `json`, `graphml`, or `csv`. */
-  format: 'json' | 'graphml' | 'csv';
-  /** Serialised graph in the requested format. */
-  data: string;
+  /** The agent's memory namespace (`_dakera_agent_{agent_id}`). */
+  namespace: string;
   /** Total number of memory nodes in the export. */
   node_count: number;
   /** Total number of edges in the export. */
   edge_count: number;
+  /** All graph edges for the agent. */
+  edges: GraphEdge[];
 }
 
 // ============================================================================
@@ -2022,11 +2058,14 @@ export interface KgExportResponse {
   edges: GraphEdge[];
 }
 
-/** Options for `client.memories.graph()`. */
+/** Options for `client.memoryGraph()`. */
 export interface MemoryGraphOptions {
-  /** Maximum traversal depth (default: 1, max: 3). */
+  /** Maximum traversal depth (default: 1; the server caps it). */
   depth?: number;
-  /** Filter by edge types. `undefined` returns all types. */
+  /**
+   * Keep only edges of these types. Applied by the client: the server's
+   * traversal route has no type filter.
+   */
   types?: EdgeType[];
 }
 
@@ -2050,8 +2089,11 @@ export interface EntityExtractionResponse {
 
 /** Response from GET /v1/memory/entities/:id */
 export interface MemoryEntitiesResponse {
+  /** The requested memory ID (filled by the client; the server omits it). */
   memory_id: string;
   entities: ExtractedEntity[];
+  /** Number of entities. */
+  count: number;
 }
 
 // =============================================================================
