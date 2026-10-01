@@ -570,8 +570,10 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
   describe('knowledgeQuery', () => {
     it('should query the knowledge graph with filters', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        nodes: [{ id: 'mem-1' }, { id: 'mem-2' }],
-        edges: [{ source: 'mem-1', target: 'mem-2', type: 'related_to', weight: 0.85 }],
+        agent_id: 'agent-1',
+        node_count: 2,
+        edge_count: 1,
+        edges: [{ from_id: 'mem-1', to_id: 'mem-2', edge_type: 'related_to', weight: 0.85, created_at: 1 }],
       }));
 
       const result = await client.knowledgeQuery('agent-1', {
@@ -582,7 +584,9 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
         limit: 50,
       });
 
-      expect(result.nodes).toHaveLength(2);
+      expect(result.node_count).toBe(2);
+      expect(result.edges[0].source_id).toBe('mem-1');
+      expect(result.edges[0].target_id).toBe('mem-2');
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/knowledge/query');
       expect(url).toContain('agent_id=agent-1');
@@ -595,7 +599,7 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
     });
 
     it('should query with only agent_id', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ nodes: [], edges: [] }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ agent_id: 'agent-1', node_count: 0, edge_count: 0, edges: [] }));
 
       await client.knowledgeQuery('agent-1');
 
@@ -608,15 +612,17 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
   describe('knowledgePath', () => {
     it('should find shortest path between two memories', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
+        agent_id: 'agent-1',
+        from_id: 'mem-1',
+        to_id: 'mem-5',
+        hop_count: 2,
         path: ['mem-1', 'mem-3', 'mem-5'],
-        hops: 2,
-        total_weight: 1.7,
       }));
 
       const result = await client.knowledgePath('agent-1', 'mem-1', 'mem-5');
 
       expect(result.path).toEqual(['mem-1', 'mem-3', 'mem-5']);
-      expect(result.hops).toBe(2);
+      expect(result.hop_count).toBe(2);
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/knowledge/path');
       expect(url).toContain('agent_id=agent-1');
@@ -631,7 +637,6 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
         agent_id: 'agent-1',
         format: 'json',
-        nodes: [{ id: 'mem-1' }],
         edges: [],
         node_count: 1,
         edge_count: 0,

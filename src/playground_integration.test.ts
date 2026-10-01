@@ -80,12 +80,15 @@ describeIntegration("Playground workflow — store → recall → search → KG 
     }
   });
 
-  it("step 4: links two memories with a related_to KG edge", async () => {
+  it("step 4: links two memories with an explicit (linked_by) KG edge", async () => {
     expect(mem1Id).toBeTruthy();
     expect(mem2Id).toBeTruthy();
 
-    const link = await client.memoryLink(mem1Id, mem2Id, "related_to");
+    // The server records explicit links as linked_by and needs the owning agent.
+    const link = await client.memoryLink(mem1Id, mem2Id, { agentId: AGENT_ID });
     expect(link.edge).toBeDefined();
-    expect(link.edge?.edge_type).toBe("related_to");
+    expect(link.edge.edge_type).toBe("linked_by");
+    expect(link.from_id).toBe(mem1Id);
+    expect(link.to_id).toBe(mem2Id);
   });
 });

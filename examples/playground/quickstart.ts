@@ -92,7 +92,7 @@ async function main() {
   console.log('\n--- 4. Knowledge Graph Link ---');
 
   try {
-    const link = await client.memoryLink(mem1.memory.id, mem2.memory.id, 'related_to');
+    const link = await client.memoryLink(mem1.memory.id, mem2.memory.id, { agentId: AGENT_ID });
     console.log(`Linked ${mem1.memory.id} → ${mem2.memory.id}`);
     console.log(`  Edge: ${link.edge?.edge_type ?? 'created'}`);
   } catch (kgErr: unknown) {

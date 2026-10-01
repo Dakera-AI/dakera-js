@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-01
+
+Fixes the knowledge-graph calls against the real server contract (checked live against
+`ghcr.io/dakera-ai/dakera:0.12.0`; the v0.11.108 server has the same request and response
+types). Before this release none of them matched what the server sends or needs.
+
+### Changed (breaking for calls that never worked)
+
+- **`memoryLink(sourceId, targetId, { agentId, label? })`**: `POST /v1/memories/{id}/links`
+  requires `agent_id` (the agent owning both memories); the old
+  `memoryLink(sourceId, targetId, edgeType)` sent none, so every call failed with
+  `422 INVALID_REQUEST` (missing field `agent_id`). The server records every explicit link as
+  `linked_by`, so the edge-type argument is gone; passing a string as the third argument (the old
+  call) or omitting `agentId` throws a `TypeError` before any request. `label` is sent, but the
+  server does not store it.
+- `DakeraDelegationHelper.linkDelegation()` (TealTiger integration) takes `agentId` and creates a
+  `linked_by` edge; `getDelegationChain()` follows `linked_by` edges, the type the server stores
+  delegation links as (it never had a `delegated_from` type, so the old chain was always empty).
+
+### Fixed
+
+- **Graph edges** (`memoryGraph`, `agentGraphExport`, `knowledgeQuery`, `knowledgeExport`, the
+  link answer): the server sends `from_id`, `to_id`, `edge_type`, `weight`, `created_at` and no
+  edge id. Edges are now normalized: `from_id` / `to_id` plus the older `source_id` /
+  `target_id` (same values) and `id: ''`, so code reading either name works. `GraphEdge` gains
+  `from_id` / `to_id`.
+- **`memoryLink()` answer**: the server answers `{from_id, to_id, edge_type}`; `GraphLinkResponse`
+  now has those fields, and `edge` is built from them (weight 1.0, as the server stores explicit
+  links; `created_at` 0 because the answer omits it). It used to be `undefined`.
+- **`memoryGraph()`**: the server answers `{root_id, depth, node_count, nodes}` with each node's
+  edges on the node (`nodes[].edges`), no top-level `edges` and no `content_preview` /
+  `importance`. `MemoryGraph` gains `node_count`; `GraphNode` gains `edges` (the two never-sent
+  fields are now optional); `edges` collects every node's edges (it was `undefined`). The `types`
+  filter is applied client-side and no longer sent (the route has no such parameter).
+- **`memoryPath()`** sent `?target=`; the route reads `?to=`, so every call failed with
+  `400 INVALID_REQUEST` (missing field `to`). The answer is `{from_id, to_id, path, hop_count}`;
+  `GraphPath` gains those fields and keeps `source_id` / `target_id` / `hops` as the same values
+  (the never-sent `edges` field is removed).
+- **`agentGraphExport()`**: the route always answers JSON
+  `{agent_id, namespace, node_count, edge_count, edges}` and ignores `format`, which is no longer
+  sent (the argument stays so existing calls compile; use `knowledgeExport(agentId, 'graphml')`
+  for GraphML). `GraphExport` now has `namespace` and `edges` instead of the never-sent
+  `format` / `data`.
+- **`memoryEntities()`**: the server answers `{entities, count}` without `memory_id`;
+  `memory_id` is now filled from the requested id and `count` is typed.
+- **`recall()` / `searchMemories()`** accept `tags` (the server's request has it; it could not be
+  sent).
+- Path segments of the graph routes are URL-encoded.
+
+### Tests
+
+- Unit tests use the server's real shapes (the old fixtures encoded the wrong contract), and
+  check the `to` parameter, the link body, the `TypeError` for old calls, client-side type
+  filtering, `tags`, and the `agent_id` query of `getMemory` / `updateMemory`.
+- `src/integration.test.ts` has a live round trip against the CI server: store two memories,
+  update, link with `agentId`, graph, path, export, knowledge query and entities.
+
 ## [0.12.0] - 2026-10-01
 
 ### Added

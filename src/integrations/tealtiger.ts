@@ -427,7 +427,7 @@ export class DakeraDecisionStore {
 /**
  * Manages agent delegation chains using the Dakera memory knowledge graph.
  *
- * Creates typed `delegated_from` edges between decision memory nodes,
+ * Creates explicit (`linked_by`) edges from child to parent decision memory nodes,
  * enabling audit-trail traversal across arbitrarily deep delegation hierarchies.
  *
  * @example
@@ -435,7 +435,7 @@ export class DakeraDecisionStore {
  * const helper = new DakeraDelegationHelper(client);
  *
  * // Link child decision to parent
- * await helper.linkDelegation({ childId: childMemId, parentId: parentMemId });
+ * await helper.linkDelegation({ agentId: 'my-agent', childId: childMemId, parentId: parentMemId });
  *
  * // Traverse the full chain
  * const chain = await helper.getDelegationChain('my-agent', rootMemId, 5);
@@ -443,7 +443,14 @@ export class DakeraDecisionStore {
  * ```
  */
 export class DakeraDelegationHelper {
-  private static readonly EDGE_TYPE = 'delegated_from';
+  /**
+   * The server records every explicit link as `linked_by` (it has no
+   * `delegated_from` edge type). The `delegated_from` label is sent with the
+   * link, but the server (v0.11.108 / v0.12) does not store it, so the chain
+   * is every explicit link reachable from the root.
+   */
+  private static readonly EDGE_TYPE = 'linked_by';
+  private static readonly LABEL = 'delegated_from';
 
   private readonly client: DakeraClient;
 
@@ -452,23 +459,31 @@ export class DakeraDelegationHelper {
   }
 
   /**
-   * Create a `delegated_from` KG edge from `childId` to `parentId`.
+   * Link `childId` to `parentId` with an explicit (`linked_by`) KG edge.
    *
+   * @param agentId - Agent that owns both decision memories (the server needs it).
    * @param childId - Dakera memory ID of the child (delegated) decision.
    * @param parentId - Dakera memory ID of the parent (delegating) decision.
    */
-  async linkDelegation({ childId, parentId }: { childId: string; parentId: string }): Promise<void> {
-    await this.client.memoryLink(
-      childId,
-      parentId,
-      DakeraDelegationHelper.EDGE_TYPE as import('../types').EdgeType,
-    );
+  async linkDelegation({
+    agentId,
+    childId,
+    parentId,
+  }: {
+    agentId: string;
+    childId: string;
+    parentId: string;
+  }): Promise<void> {
+    await this.client.memoryLink(childId, parentId, {
+      agentId,
+      label: DakeraDelegationHelper.LABEL,
+    });
   }
 
   /**
    * Traverse the delegation chain from a root decision memory.
    *
-   * Performs a BFS traversal over `delegated_from` edges in the memory KG,
+   * Performs a BFS traversal over the explicit (`linked_by`) edges in the memory KG,
    * returning an ordered list of memory IDs from root outward.
    *
    * @param agentId - Dakera namespace containing the decision memories.
