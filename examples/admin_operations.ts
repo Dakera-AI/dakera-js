@@ -36,8 +36,8 @@ async function main() {
 
   // Update quotas (set a generous default)
   const updated = await client.updateQuotas({
-    max_namespaces: 100,
-    max_vectors_per_namespace: 10_000_000,
+    max_vectors: 10_000_000,
+    enforcement: 'soft',
   });
   console.log(`Updated quotas: ${JSON.stringify(updated)}`);
 

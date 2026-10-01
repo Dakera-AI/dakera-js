@@ -142,26 +142,6 @@ describe('DakeraClient', () => {
     });
   });
 
-  describe('fetch', () => {
-    it('should fetch vectors by ID', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: async () => ({
-          vectors: [
-            { id: 'vec1', values: [0.1, 0.2, 0.3] },
-            { id: 'vec2', values: [0.4, 0.5, 0.6] },
-          ],
-        }),
-      });
-
-      const vectors = await client.fetch('test-ns', ['vec1', 'vec2']);
-
-      expect(vectors).toHaveLength(2);
-      expect(vectors[0].id).toBe('vec1');
-    });
-  });
-
   describe('batchQuery', () => {
     it('should execute batch queries', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -1981,7 +1961,7 @@ describe('DakeraClient', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
-        json: async () => ({ memory_id: 'mem_123' }),
+        json: async () => ({ id: 'mem_123', content: 'updated content' }),
       });
 
       const result = await client.updateMemory('agent-1', 'mem_123', {
@@ -1989,8 +1969,9 @@ describe('DakeraClient', () => {
         importance: 0.95,
       });
 
-      expect(result.memory_id).toBe('mem_123');
-      const [, init] = mockFetch.mock.calls[0];
+      expect(result.id).toBe('mem_123');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('http://localhost:3000/v1/memory/update/mem_123?agent_id=agent-1');
       expect(init?.method).toBe('PUT');
     });
 

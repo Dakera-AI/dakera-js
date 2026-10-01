@@ -55,8 +55,82 @@ export function sessionId(id: string): SessionId { return id as SessionId; }
 /** Read consistency level for queries */
 export type ReadConsistency = 'strong' | 'eventual' | 'bounded_staleness';
 
-/** Distance metric for similarity search */
-export type DistanceMetric = 'cosine' | 'euclidean' | 'dot_product';
+// ============================================================================
+// Forward-compatible wire enums (R9 / DAK-10004)
+//
+// The server's registries grow over time and the capabilities contract says
+// clients MUST ignore strings they do not know. Every wire enum below is
+// therefore a `Known*` literal union (what this SDK declares — autocomplete,
+// exhaustiveness in *your* code) widened with `(string & {})` so a newer server
+// string type-checks and never fails at runtime. Use the `isKnown*` guards to
+// narrow.
+// ============================================================================
+
+/** Distance metrics this SDK declares. */
+export type KnownDistanceMetric = 'cosine' | 'euclidean' | 'dot_product';
+/** Distance metric for similarity search — a known value or any newer server string. */
+export type DistanceMetric = KnownDistanceMetric | (string & {});
+export const KNOWN_DISTANCE_METRICS: readonly KnownDistanceMetric[] = [
+  'cosine',
+  'euclidean',
+  'dot_product',
+];
+export function isKnownDistanceMetric(value: unknown): value is KnownDistanceMetric {
+  return (KNOWN_DISTANCE_METRICS as readonly unknown[]).includes(value);
+}
+
+/** Index kinds this SDK declares (server storage keys; `index_type` values). */
+export type KnownIndexKind = 'hnsw' | 'pq' | 'ivf' | 'ivfpq' | 'spfresh' | 'fulltext';
+/** An index kind — a known value or any newer server string. */
+export type IndexKind = KnownIndexKind | (string & {});
+export const KNOWN_INDEX_KINDS: readonly KnownIndexKind[] = [
+  'hnsw',
+  'pq',
+  'ivf',
+  'ivfpq',
+  'spfresh',
+  'fulltext',
+];
+export function isKnownIndexKind(value: unknown): value is KnownIndexKind {
+  return (KNOWN_INDEX_KINDS as readonly unknown[]).includes(value);
+}
+
+/** Vector search modes this SDK declares (`DAKERA_SEARCH_MODE`; process-wide on the server). */
+export type KnownSearchMode = 'hybrid' | 'binary' | 'float' | 'scalar' | 'rabitq';
+/** A search mode — a known value or any newer server string. */
+export type SearchMode = KnownSearchMode | (string & {});
+export const KNOWN_SEARCH_MODES: readonly KnownSearchMode[] = [
+  'hybrid',
+  'binary',
+  'float',
+  'scalar',
+  'rabitq',
+];
+export function isKnownSearchMode(value: unknown): value is KnownSearchMode {
+  return (KNOWN_SEARCH_MODES as readonly unknown[]).includes(value);
+}
+
+/** Record representation kinds this SDK declares (R2 records surface). */
+export type KnownRepresentationKind = 'dense' | 'token_multivector' | 'patch_multivector';
+/** A representation kind — a known value or any newer server string. */
+export type RepresentationKind = KnownRepresentationKind | (string & {});
+export const KNOWN_REPRESENTATION_KINDS: readonly KnownRepresentationKind[] = [
+  'dense',
+  'token_multivector',
+  'patch_multivector',
+];
+export function isKnownRepresentationKind(value: unknown): value is KnownRepresentationKind {
+  return (KNOWN_REPRESENTATION_KINDS as readonly unknown[]).includes(value);
+}
+
+/** Record block dtypes this SDK declares (`store_as` encodings). */
+export type KnownBlockDType = 'f32' | 'f16' | 'i8';
+/** A block dtype — a known value or any newer server string. */
+export type BlockDType = KnownBlockDType | (string & {});
+export const KNOWN_BLOCK_DTYPES: readonly KnownBlockDType[] = ['f32', 'f16', 'i8'];
+export function isKnownBlockDType(value: unknown): value is KnownBlockDType {
+  return (KNOWN_BLOCK_DTYPES as readonly unknown[]).includes(value);
+}
 
 /** Configuration for bounded staleness reads */
 export interface StalenessConfig {
@@ -343,6 +417,16 @@ export interface ClientOptions {
   /** Base URL of the dakera-ode sidecar (e.g. `"http://localhost:8080"`).
    *  Required to call {@link DakeraClient.extractEntities}. */
   odeUrl?: string;
+  /**
+   * R9: validate the requested embedding model, index kind and distance metric
+   * against `GET /v1/capabilities` *before* sending a request, throwing
+   * `UnsupportedCapabilityError` that names what the server supports.
+   * Capabilities are fetched lazily on first use and cached (see
+   * {@link DakeraClient.capabilities}); a server that predates the endpoint
+   * (404) disables the check silently. When `false` (default) the check still
+   * runs whenever capabilities have already been fetched through `capabilities()`.
+   */
+  preflight?: boolean;
 }
 
 // =============================================================================
@@ -350,14 +434,43 @@ export interface ClientOptions {
 // =============================================================================
 
 /**
- * Supported embedding models for text-based operations.
+ * Embedding models this SDK declares for text-based operations.
+ * - bge-large: BGE-large - Best quality, server default (1024 dimensions)
  * - minilm: MiniLM-L6 - Fast, good quality (384 dimensions)
  * - bge-small: BGE-small - Balanced performance (384 dimensions)
  * - e5-small: E5-small - High quality (384 dimensions)
  * - modernbert-embed-base: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
  * - gte-modernbert-base: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
+ * - bge-m3: BGE-M3 multilingual - 1024 dimensions, 8192-token window (server v0.12+)
+ *
+ * The list the *server* supports is authoritative — read it from
+ * {@link DakeraClient.capabilities}.
  */
-export type EmbeddingModel = 'bge-large' | 'minilm' | 'bge-small' | 'e5-small' | 'modernbert-embed-base' | 'gte-modernbert-base';
+export type KnownEmbeddingModel =
+  | 'bge-large'
+  | 'minilm'
+  | 'bge-small'
+  | 'e5-small'
+  | 'modernbert-embed-base'
+  | 'gte-modernbert-base'
+  | 'bge-m3';
+/**
+ * An embedding model — a known value or any newer server string (a newer
+ * server may return a model this SDK does not declare; that must not fail).
+ */
+export type EmbeddingModel = KnownEmbeddingModel | (string & {});
+export const KNOWN_EMBEDDING_MODELS: readonly KnownEmbeddingModel[] = [
+  'bge-large',
+  'minilm',
+  'bge-small',
+  'e5-small',
+  'modernbert-embed-base',
+  'gte-modernbert-base',
+  'bge-m3',
+];
+export function isKnownEmbeddingModel(value: unknown): value is KnownEmbeddingModel {
+  return (KNOWN_EMBEDDING_MODELS as readonly unknown[]).includes(value);
+}
 
 /**
  * Input for upserting a text document with automatic embedding.
@@ -537,6 +650,20 @@ export interface StoreMemoryRequest {
    * Used by temporal recall queries (server v0.11.98+, DAK-7424).
    */
   valid_from?: number;
+  /**
+   * v0.12: language of `content` (ISO 639-1 code, English or native name,
+   * optionally with a region such as `pt-BR`). Selects the parsing of content
+   * dates and rule-based entities and is recorded on the memory. Omitted: the
+   * server-wide `DAKERA_QUERY_LANG` (default English). Unsupported: 400.
+   * `GET /v1/capabilities` lists `query_languages`.
+   */
+  lang?: string;
+  /**
+   * v0.12: `sha256:<hex>` reference of an attachment already uploaded to this
+   * agent's namespace (`_dakera_agent_{agent_id}`). Needs `DAKERA_ATTACHMENTS`
+   * on the server (else 501 FEATURE_DISABLED); an unknown reference is a 404.
+   */
+  attachment_ref?: string;
 }
 
 /** A stored memory */
@@ -615,6 +742,12 @@ export interface UpdateMemoryRequest {
   metadata?: Record<string, unknown>;
   /** Updated type */
   memory_type?: MemoryType;
+  /** Updated importance (0-1) */
+  importance?: number;
+  /** Replacement tags */
+  tags?: string[];
+  /** v0.12: language of the content (see {@link StoreMemoryRequest.lang}). */
+  lang?: string;
 }
 
 /** Request to recall memories */
@@ -624,7 +757,13 @@ export interface UpdateMemoryRequest {
  * Controls which retrieval index the server uses. `"auto"` (default) lets the
  * server pick the best strategy based on the query.
  */
-export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
+export type KnownRoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
+/** A routing mode — a known value or any newer server string. */
+export type RoutingMode = KnownRoutingMode | (string & {});
+export const KNOWN_ROUTING_MODES: readonly KnownRoutingMode[] = ['auto', 'vector', 'bm25', 'hybrid'];
+export function isKnownRoutingMode(value: unknown): value is KnownRoutingMode {
+  return (KNOWN_ROUTING_MODES as readonly unknown[]).includes(value);
+}
 
 /**
  * Fusion strategy for hybrid recall (CE-14).
@@ -633,7 +772,13 @@ export type RoutingMode = 'auto' | 'vector' | 'bm25' | 'hybrid';
  * `"minmax"` (server default since v0.11.2) uses min-max score normalization;
  * `"rrf"` uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
  */
-export type FusionStrategy = 'rrf' | 'minmax';
+export type KnownFusionStrategy = 'rrf' | 'minmax';
+/** A fusion strategy — a known value or any newer server string. */
+export type FusionStrategy = KnownFusionStrategy | (string & {});
+export const KNOWN_FUSION_STRATEGIES: readonly KnownFusionStrategy[] = ['rrf', 'minmax'];
+export function isKnownFusionStrategy(value: unknown): value is KnownFusionStrategy {
+  return (KNOWN_FUSION_STRATEGIES as readonly unknown[]).includes(value);
+}
 
 export interface RecallRequest {
   /** Natural language query */
@@ -664,6 +809,12 @@ export interface RecallRequest {
   iterations?: number;
   /** v0.11.0: session-adjacent memory enrichment (±5 min). Default: `undefined` (server uses `true`). Pass `false` to disable on latency-sensitive paths. */
   neighborhood?: boolean;
+  /**
+   * v0.12: language of `query` for rule-based routing and temporal expressions
+   * (`"when", "how long ago"`). Does not translate or filter. Omitted: the
+   * server-wide `DAKERA_QUERY_LANG`. Unsupported: 400.
+   */
+  lang?: string;
 }
 
 /** Request to update importance */
@@ -1424,13 +1575,6 @@ export interface BackupInfo {
   compression?: CompressionType;
 }
 
-/** TTL configuration */
-export interface TtlConfig {
-  namespace: string;
-  ttl_seconds: number;
-  strategy?: string;
-}
-
 // =============================================================================
 // AutoPilot Types (PILOT-1 / PILOT-2 / PILOT-3)
 // =============================================================================
@@ -1706,6 +1850,8 @@ export interface BatchStoreMemoryItem {
   expires_at?: number;
   /** Optional custom ID. Auto-generated if not provided. */
   id?: string;
+  /** v0.12: `sha256:<hex>` attachment reference (see {@link StoreMemoryRequest.attachment_ref}). */
+  attachment_ref?: string;
 }
 
 /**
@@ -1720,6 +1866,8 @@ export interface BatchStoreMemoryRequest {
   agent_id: string;
   /** Memories to store (1–1000 items). */
   memories: BatchStoreMemoryItem[];
+  /** v0.12: language of the batch's contents; applies to every item. */
+  lang?: string;
 }
 
 /** A single stored memory returned in a {@link BatchStoreMemoryResponse}. */
@@ -2075,26 +2223,31 @@ export interface MemoryExportResponse {
 
 /** A single business-event entry from the audit log (OBS-1). */
 export interface AuditEvent {
-  id: string;
+  id: number;
   event_type: string;
-  agent_id?: string;
-  namespace?: string;
+  agent_id: string;
+  memory_id?: string;
+  session_id?: string;
+  importance?: number;
+  /** Unix milliseconds. */
   timestamp: number;
-  details: Record<string, unknown>;
 }
 
 /** Response from GET /v1/audit (OBS-1). */
 export interface AuditListResponse {
   events: AuditEvent[];
-  total: number;
-  cursor?: string;
+  count: number;
 }
 
-/** Response from POST /v1/audit/export (OBS-1). */
+/** Result of `exportAudit` (`GET /v1/audit/export`, OBS-1). */
 export interface AuditExportResponse {
-  data: string;
+  /** `json` or `csv`. */
   format: string;
+  /** The export as text (CSV, or the JSON events serialised). */
+  data: string;
   count: number;
+  /** Parsed rows, for the JSON format. */
+  events?: AuditEvent[];
 }
 
 // =============================================================================
@@ -2107,13 +2260,6 @@ export interface ExtractionResult {
   provider: string;
   model?: string;
   duration_ms: number;
-}
-
-/** Metadata for an available extraction provider (EXT-1). */
-export interface ExtractionProviderInfo {
-  name: string;
-  available: boolean;
-  models: string[];
 }
 
 // =============================================================================
@@ -2355,7 +2501,14 @@ export interface FulltextReindexResponse {
 export interface ReadinessResponse {
   ready: boolean;
   version: string;
-  checks: Record<string, { status: string; message?: string }>;
+  /** Storage / embedding engine / tiered engine checks. Absent while the server is starting. */
+  checks?: Record<string, { status: string; message?: string }>;
+  /** v0.12: `true` while the server has bound its port but is still loading models. */
+  starting?: boolean;
+  /** v0.12: why the server is not ready yet (only while `starting`). */
+  reason?: string;
+  /** v0.12: model downloads in progress (only while `starting`). */
+  downloads?: unknown;
 }
 
 /** Response from GET /health/live. */
@@ -2673,6 +2826,7 @@ export interface UpdateBackupScheduleRequest {
 export interface JobInfo {
   id: string;
   job_type: string;
+  /** `Pending` | `Running` | `Completed` | `Failed` | `Cancelled` */
   status: string;
   created_at: number;
   started_at?: number;
@@ -2680,6 +2834,8 @@ export interface JobInfo {
   progress: number;
   message?: string;
   metadata: Record<string, string>;
+  /** v0.12: why a `Failed` job failed (HTTP status and error code). */
+  error?: { status: number; code: string };
 }
 
 /** System diagnostics. */
@@ -2997,4 +3153,157 @@ export function tifScoreFromMetadata(data: Record<string, unknown>): TifScore {
   const falsity = Number(data['falsity'] ?? 0);
   const feedbackCount = Number(data['feedback_count'] ?? 0);
   return { truth, indeterminacy, falsity, feedbackCount, classification: classifyTif(truth, indeterminacy, falsity) };
+}
+
+// =============================================================================
+// Server v0.12.0 — attachments, transcription, image indexing, records
+// =============================================================================
+
+/** One attachment of a namespace (`GET /v1/namespaces/{ns}/attachments`). */
+export interface AttachmentEntry {
+  /** `sha256:<hex of the bytes>` — what a memory's `attachment_ref` carries. */
+  attachment_ref: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+/** Response of `POST /v1/namespaces/{ns}/attachments` (201 new, 200 already held). */
+export interface AttachmentUploadResponse extends AttachmentEntry {
+  /** `false` when the namespace already held these bytes (the upload was a no-op). */
+  created: boolean;
+}
+
+/** Response of `GET /v1/namespaces/{ns}/attachments`. */
+export interface AttachmentListResponse {
+  attachments: AttachmentEntry[];
+}
+
+/** Bytes of an attachment, with the media type it was uploaded with. */
+export interface AttachmentDownload {
+  data: Uint8Array;
+  content_type: string;
+  /** The ETag (the hash), without quotes, when the server sent one. */
+  etag?: string;
+}
+
+/** Input accepted as attachment bytes by `uploadAttachment`. */
+export type AttachmentBytes = Uint8Array | ArrayBuffer | Blob;
+
+/**
+ * Body of `POST .../attachments/{ref}/transcribe` and `.../index`: the memory
+ * the result becomes. Same fields and defaults as a memory store, minus the
+ * content (that is the transcript / caption).
+ */
+export interface AttachmentJobRequest {
+  /** The agent whose memory the job stores (required). */
+  agent_id: string;
+  /** Custom memory id; else one is derived deterministically from the request. */
+  id?: string;
+  memory_type?: MemoryType;
+  session_id?: string;
+  importance?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+  expires_at?: number;
+  /** Language of the transcript / caption for write-time derivations. */
+  lang?: string;
+}
+
+/** Body of `POST .../attachments/{ref}/transcribe` (WAV audio; English-only model). */
+export type TranscribeRequest = AttachmentJobRequest;
+
+/** Body of `POST .../attachments/{ref}/index` (PNG image; needs `DAKERA_VISION`). */
+export interface IndexImageRequest extends AttachmentJobRequest {
+  /** Caption stored as the memory text (default `[image sha256:...]`); not what is embedded. */
+  content?: string;
+}
+
+/** The 202 body of the transcribe and image-index routes. */
+export interface AttachmentJobAccepted {
+  job_id: string;
+  attachment_ref: string;
+  agent_id: string;
+  /** The memory the job stores; look it up with this id after a server restart. */
+  memory_id: string;
+  /** Wire name of the model the job runs. */
+  model: string;
+  /** Route to poll (`GET`). */
+  status_url: string;
+}
+
+/** Status of a transcription / image-index job. Jobs live in server memory. */
+export type AttachmentJob = JobInfo;
+
+/** Options for `waitForAttachmentJob`. */
+export interface WaitForJobOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms (default 600000). */
+  timeoutMs?: number;
+}
+
+/** Options for `waitUntilReady`. */
+export interface WaitUntilReadyOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms (default 120000). */
+  timeoutMs?: number;
+}
+
+/** One extra representation of a record on the write path (`POST .../records`). */
+export interface RepresentationInput {
+  /** Slot name, unique within the record; never `"dense"`; `colbert.fde` / `patch.fde` are server-derived. */
+  name: string;
+  /** `dense` | `token_multivector` | `patch_multivector` (default `dense`). */
+  kind?: RepresentationKind;
+  /** Registry name of the model that produced the vectors; empty = the namespace default. */
+  model?: string;
+  /** The vectors, row-major; every row the same non-zero length. */
+  vectors: number[][];
+  /** On-disk packing: `f32` (lossless, default), `f16` or `i8`. */
+  store_as?: BlockDType;
+}
+
+/** One record on the write path: one primary vector plus named representations. */
+export interface RecordInput {
+  id: string;
+  /** The primary dense vector — the one that is indexed and searched. */
+  values: number[];
+  representations?: RepresentationInput[];
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+}
+
+/** Response of `POST /v1/namespaces/{ns}/records`. */
+export interface RecordUpsertResponse {
+  upserted_count: number;
+}
+
+/** What a record carries in one slot (`GET .../records/{id}`). */
+export interface RepresentationInfo {
+  name: string;
+  kind: RepresentationKind;
+  model?: string;
+  dim: number;
+  count: number;
+  dtype: BlockDType;
+  /** Packed size on disk. */
+  bytes: number;
+  /** Decoded rows — only with `includeVectors`. */
+  vectors?: number[][];
+}
+
+/** Response of `GET /v1/namespaces/{ns}/records/{id}`. */
+export interface RecordView {
+  id: string;
+  /** The primary vector — only with `includeVectors`. */
+  values?: number[];
+  dimension: number;
+  representations?: RepresentationInfo[];
+  /** Slots written by a newer server that this one skipped. */
+  unsupported_representations?: number;
+  metadata?: Record<string, unknown>;
+  ttl_seconds?: number;
+  expires_at?: number;
 }

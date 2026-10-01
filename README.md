@@ -49,7 +49,7 @@ curl http://localhost:3000/health  # → {"status":"ok"}
 For persistent storage with Docker Compose:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker-compose.yml \
+curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker/docker-compose.yml \
   -o docker-compose.yml
 DAKERA_API_KEY=dk-mykey docker compose up -d
 ```
@@ -125,6 +125,43 @@ for await (const event of stream) {
 
 ---
 
+## What's new for Dakera server v0.12.0
+
+This SDK release (0.12.0) targets Dakera server **v0.12.0** and is **compatible with both v0.11.108
+and v0.12.0 servers**: every addition is opt-in or additive, requests that do not use them are
+byte-identical to before, and the v0.12-only routes simply answer 404/501 on an older server.
+Upgrade guide for operators: `docs/v0.12/UPGRADE.md` in the server release (the server repository is private;
+see the public [Dakera changelog](https://dakera.ai/docs/changelog) for release notes).
+
+- **Capabilities** — `client.capabilities()` (`GET /v1/capabilities`): models (`bge-m3`, `colbert-small`),
+  index kinds (`ivfpq`), search modes (`rabitq`), record kinds/dtypes, query languages, and the
+  attachment / transcription / vision / scoring sections. Unknown values from a newer server never throw.
+- **Health** — `healthReady()` / `healthLive()` / `waitUntilReady()`. A starting v0.12 server answers
+  `/health/ready` with `503` + `Retry-After`: that means *not ready*, never healthy.
+- **Errors** — every v0.12 error is JSON and every `503` carries `Retry-After`; the retry loop now waits
+  that long. New typed errors: `PayloadTooLargeError` (413: `isQuota` for a full namespace, otherwise an
+  oversize request), `NotImplementedError` (501: `isFeatureDisabled`, `details` names the env var),
+  `ConflictError` (409); `err.details`, `err.resource` (404) and `err.retryAfterSeconds`.
+- **Attachments** (server `DAKERA_ATTACHMENTS=1`) — `uploadAttachment`, `listAttachments`,
+  `downloadAttachment`, `deleteAttachment`, `transcribeAttachment` (WAV), `indexImageAttachment` (PNG, needs
+  `DAKERA_VISION=1`), job polling with `waitForAttachmentJob`, and `attachment_ref` on `storeMemory`.
+- **Records** (server `DAKERA_RECORDS=1`) — `upsertRecords` / `getRecord`: one primary vector plus named
+  representations (`dense`, `token_multivector`, `patch_multivector`; stored as `f32`, `f16`, `i8`).
+- **Per-request `lang`** on `storeMemory`, `storeMemoriesBatch`, `updateMemory`, `recall`, `searchMemories`
+  and `extractEntities` (see `capabilities().query_languages`).
+- **Namespace entity config** — `replaceNamespaceEntityConfig()` is `PUT /v1/namespaces/{ns}/config`
+  (full replacement; clears `entity_types`). `configureNamespaceNer()` stays a merging `PATCH`.
+
+```ts
+await client.waitUntilReady();                       // never treats a starting server as healthy
+const up = await client.uploadAttachment('uploads', wavBytes, 'audio/wav');
+const job = await client.transcribeAttachment('uploads', up.attachment_ref, { agent_id: 'my-agent' });
+await client.waitForAttachmentJob(job);              // the transcript is now a memory
+await client.recall('my-agent', 'was ist gesagt worden?', { lang: 'de' });
+```
+
+---
+
 ## Features
 
 - **Agent Memory** — store, recall, search, and forget memories with importance scoring
@@ -138,6 +175,7 @@ for await (const event of stream) {
 - **Feedback Loop** — upvote/downvote/flag memories to improve recall quality
 - **T-I-F Reliability** — `TifScore` type and `evaluateTif()` for Truth-Indeterminacy-Falsity scoring of memory reliability
 - **Entity Extraction** — GLiNER NER for automatic entity detection
+- **Attachments & Records** — audio transcription, image indexing, multi-representation records (server v0.12)
 - **SSE Streaming** — async generator event subscriptions, browser-compatible
 - **Branded Types** — `VectorId`, `AgentId`, `MemoryId`, `SessionId` for compile-time safety
 - **ESM + CJS** — dual bundle output, works in Node.js and browsers
@@ -194,7 +232,7 @@ npx tsx examples/basic.ts
 | | |
 |---|---|
 | [Documentation](https://dakera.ai/docs) | Full API reference and guides |
-| [TypeScript SDK docs](https://dakera.ai/docs/sdk/typescript) | TypeScript-specific reference |
+| [TypeScript SDK docs](https://dakera.ai/docs/typescript-sdk) | TypeScript-specific reference |
 | [Benchmark](https://dakera.ai/benchmark) | LoCoMo evaluation results |
 | [dakera.ai](https://dakera.ai) | Website and early access |
 | [GitHub Org](https://github.com/dakera-ai) | All public repos |

@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-01
+
+### Added
+
+- **Forward-compat contract (R9, DAK-10004)** — the server's registries (models, index kinds,
+  search modes, distance metrics, record representation kinds, block dtypes) grow over time and
+  `GET /v1/capabilities` documents the rule: every field is additive; unknown fields and unknown
+  strings inside lists MUST be ignored; `capabilities_version` bumps only on a breaking reshape.
+  This release makes the SDK honour that rule end to end and moves it to the 0.12 line.
+- **Widened wire enums** — `EmbeddingModel`, `DistanceMetric`, `RoutingMode`, `FusionStrategy`
+  and the new `IndexKind`, `SearchMode`, `RepresentationKind`, `BlockDType` are now
+  `Known* | (string & {})`: the `Known*` literal unions keep autocomplete and exhaustiveness for
+  the values this SDK declares, while a newer server string type-checks and never fails at
+  runtime. `KNOWN_*` arrays and `isKnown*()` guards narrow at runtime. `'bge-m3'`, `'ivfpq'` and
+  `'rabitq'` are declared for the strings server v0.12 adds.
+- **`client.capabilities({ refresh })`** — typed `ServerCapabilities` for `GET /v1/capabilities`:
+  models (name, aliases, dimension, context window, active flag, MRL dims), index kinds (all /
+  vector / live), distance metrics, the search mode the server runs and every value it accepts
+  (`search_modes_accepted` prose parsed, aliases expanded), `records` (enabled, kinds, dtypes,
+  limits), `query_languages`, `reembed_pending`. Cached per client instance; `refresh: true`
+  re-fetches. `parseCapabilities()` is the runtime guard (never throws on a newer document; keeps
+  the verbatim document in `raw`). Helpers: `findModel`, `activeModel`, `supportedValues`,
+  `supportsCapability`, `requireCapability`.
+- **Pre-flight validation** — `upsertText` / `queryText` / `batchQueryText` (`model`),
+  `createNamespace` (`indexType`), `configureNamespace` and `query` (distance metric) check the
+  requested value against cached capabilities *before* sending and throw
+  `UnsupportedCapabilityError` (a `ValidationError`) whose message and `.supported` list name what
+  the server accepts. Runs whenever `capabilities()` has been called; `new DakeraClient({ ...,
+  preflight: true })` fetches lazily on first use and degrades silently on a pre-0.12 server
+  (404). `client.requireSupported(kind, value)` exposes the same check for `search_mode` and
+  `query_language`.
+
+- **Server v0.12.0 support** (compatible with v0.11.108 and v0.12.0 servers; operator guide:
+  `docs/v0.12/UPGRADE.md` in the server repo):
+  - `healthReady()` returns the body of a starting server's `503` (`ready: false`, `starting`,
+    `reason`) instead of throwing or retrying; new `waitUntilReady({ intervalMs, timeoutMs })`
+    polls `/health/ready` and never treats a 503 as healthy.
+  - Retry logic honours `Retry-After` (integer seconds, capped at 60 s) on 503 and 429; 501 is never
+    retried. `DakeraError` gains `details`, `resource` (404: what was not found) and
+    `retryAfterSeconds`.
+  - New error classes `PayloadTooLargeError` (413; `isQuota` tells `QUOTA_EXCEEDED` from
+    `PAYLOAD_TOO_LARGE`), `NotImplementedError` (501; `isFeatureDisabled` for `FEATURE_DISABLED`) and
+    `ConflictError` (409); new `ErrorCode` members (`PAYLOAD_TOO_LARGE`, `FEATURE_DISABLED`,
+    `NOT_IMPLEMENTED`, `JOB_NOT_FOUND`, `CONFLICT`, `QUERY_TIMEOUT`, ...). A malformed JSON error
+    body no longer hides the HTTP status.
+  - Attachments: `uploadAttachment`, `listAttachments`, `downloadAttachment`, `deleteAttachment`,
+    `transcribeAttachment` / `getTranscriptionJob`, `indexImageAttachment` / `getImageIndexJob`,
+    `waitForAttachmentJob`; `attachment_ref` on `StoreMemoryRequest` and batch items.
+  - Records: `upsertRecords` / `getRecord` with named representations (`RecordInput`,
+    `RepresentationInput`, `RecordView`).
+  - Per-request `lang` on `storeMemory`, `storeMemoriesBatch`, `updateMemory`, `recall`,
+    `searchMemories`, `extractEntities` and the attachment job requests.
+  - `replaceNamespaceEntityConfig()` (`PUT /v1/namespaces/{ns}/config`) clears `entity_types`, which
+    the merging `PATCH` (`configureNamespaceNer`) no longer can (server TRACKER K34).
+  - `ServerCapabilities` gains `scoring`, `attachments`, `vision` and `unreadable_records`.
+
+### Fixed
+
+- **Route sweep against the v0.12.0 router** (`crates/api/src/lib.rs`): all 182 `request()` call sites
+  were diffed (method + path; `/admin/*` is also served as `/v1/admin/*`). 8 called routes the server
+  does not serve (none of them existed in v0.11.108 either); `src/routes.test.ts` now keeps a
+  snapshot of the router and fails if an SDK call has no route.
+  - `updateQuotas()` called `PUT /v1/admin/quotas`. It now calls `PUT /admin/quotas/default`, or
+    `PUT /admin/quotas/{namespace}` when a namespace is passed, with the `{ config }` body.
+  - `getIndexStats(ns)` (`GET /v1/namespaces/{ns}/stats`) now reads `GET /admin/indexes/stats` and picks
+    the namespace; `compact(ns)` (`POST /v1/namespaces/{ns}/compact`) now calls `POST /ops/compact`
+    (returns `CompactionResponse`, accepts `force`).
+  - `exportAudit()` sent `POST /v1/audit/export`; the route is `GET` with query parameters and
+    answers `json` or `csv` (`jsonl` is mapped to `json`). `AuditEvent` / `AuditListResponse` now match
+    the server rows (`id: number`, `agent_id`, `memory_id`, `session_id`, `importance`, millisecond
+    `timestamp`; list returns `{ events, count }`, no cursor).
+  - `updateMemory()` now sends the `agent_id` query parameter the server requires and returns the
+    updated `Memory`; `UpdateMemoryRequest` gains `importance` and `tags`.
+  - Verified unchanged: the typed `admin*Quota` methods, admin keys, memory/session/agent/analytics,
+    SSE and ops routes, and the `QuotaConfig`/`QuotaStatus`/`IndexStats` shapes.
+
+### Removed
+
+- `fetch()` (`POST /v1/namespaces/{ns}/fetch`), `flush()` (`.../flush`), `configureTtl()`
+  (`POST /v1/admin/namespaces/{ns}/ttl`) and `listExtractProviders()` (`GET /v1/extract/providers`):
+  the server has no such routes (vectors have no by-id read route; set TTLs through
+  `PUT /v1/namespaces/{ns}/memory_policy`). They could only ever return 404/405. Types `TtlConfig` and
+  `ExtractionProviderInfo` removed with them.
+
+### Changed
+
+- Version 0.11.107 → 0.12.0 (SDK line now tracks server v0.12).
+
 ## [0.11.106] - 2026-08-07
 
 ### Security
