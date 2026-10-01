@@ -742,6 +742,10 @@ export interface UpdateMemoryRequest {
   metadata?: Record<string, unknown>;
   /** Updated type */
   memory_type?: MemoryType;
+  /** Updated importance (0-1) */
+  importance?: number;
+  /** Replacement tags */
+  tags?: string[];
   /** v0.12: language of the content (see {@link StoreMemoryRequest.lang}). */
   lang?: string;
 }
@@ -1571,13 +1575,6 @@ export interface BackupInfo {
   compression?: CompressionType;
 }
 
-/** TTL configuration */
-export interface TtlConfig {
-  namespace: string;
-  ttl_seconds: number;
-  strategy?: string;
-}
-
 // =============================================================================
 // AutoPilot Types (PILOT-1 / PILOT-2 / PILOT-3)
 // =============================================================================
@@ -2226,26 +2223,31 @@ export interface MemoryExportResponse {
 
 /** A single business-event entry from the audit log (OBS-1). */
 export interface AuditEvent {
-  id: string;
+  id: number;
   event_type: string;
-  agent_id?: string;
-  namespace?: string;
+  agent_id: string;
+  memory_id?: string;
+  session_id?: string;
+  importance?: number;
+  /** Unix milliseconds. */
   timestamp: number;
-  details: Record<string, unknown>;
 }
 
 /** Response from GET /v1/audit (OBS-1). */
 export interface AuditListResponse {
   events: AuditEvent[];
-  total: number;
-  cursor?: string;
+  count: number;
 }
 
-/** Response from POST /v1/audit/export (OBS-1). */
+/** Result of `exportAudit` (`GET /v1/audit/export`, OBS-1). */
 export interface AuditExportResponse {
-  data: string;
+  /** `json` or `csv`. */
   format: string;
+  /** The export as text (CSV, or the JSON events serialised). */
+  data: string;
   count: number;
+  /** Parsed rows, for the JSON format. */
+  events?: AuditEvent[];
 }
 
 // =============================================================================
@@ -2258,13 +2260,6 @@ export interface ExtractionResult {
   provider: string;
   model?: string;
   duration_ms: number;
-}
-
-/** Metadata for an available extraction provider (EXT-1). */
-export interface ExtractionProviderInfo {
-  name: string;
-  available: boolean;
-  models: string[];
 }
 
 // =============================================================================

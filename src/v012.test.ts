@@ -424,3 +424,87 @@ describe('server v0.12.0', () => {
     });
   });
 });
+
+describe('v0.12.0 route sweep fixes', () => {
+  const ok = (body: unknown, contentType = 'application/json') => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': contentType }),
+    json: async () => body,
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  });
+  let client: DakeraClient;
+  beforeEach(() => {
+    mockFetch.mockReset();
+    client = new DakeraClient({ baseUrl: 'http://localhost:3000', apiKey: 'k' });
+  });
+  const call = () => {
+    const c = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
+    return { url: c[0] as string, init: c[1] as RequestInit };
+  };
+
+  it('updateQuotas PUTs the default quota (server has no PUT /admin/quotas)', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ success: true, namespace: 'default', config: { max_vectors: 5 }, message: 'm' }));
+    const r = await client.updateQuotas({ max_vectors: 5, enforcement: 'soft' });
+    expect(r.success).toBe(true);
+    expect(call().url).toBe('http://localhost:3000/v1/admin/quotas/default');
+    expect(call().init.method).toBe('PUT');
+    expect(JSON.parse(call().init.body as string)).toEqual({ config: { max_vectors: 5, enforcement: 'soft' } });
+  });
+
+  it('updateQuotas with a namespace PUTs /admin/quotas/{ns}; wrapped bodies pass through', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ success: true, namespace: 'a b', config: {}, message: 'm' }));
+    await client.updateQuotas({ config: { max_storage_bytes: 9 } }, 'a b');
+    expect(call().url).toBe('http://localhost:3000/v1/admin/quotas/a%20b');
+    expect(JSON.parse(call().init.body as string)).toEqual({ config: { max_storage_bytes: 9 } });
+  });
+
+  it('getIndexStats reads the namespace out of GET /admin/indexes/stats', async () => {
+    const stats = { index_type: 'hnsw', is_built: true, size_bytes: 1, indexed_vectors: 2 };
+    mockFetch.mockResolvedValue(ok({ namespaces: { a: stats }, total_indexed_vectors: 2, total_size_bytes: 1 }));
+    expect(await client.getIndexStats('a')).toEqual(stats);
+    expect(call().url).toBe('http://localhost:3000/v1/admin/indexes/stats');
+    await expect(client.getIndexStats('missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('compact POSTs /ops/compact with the namespace and force', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ job_id: 'j1', message: 'started' }));
+    const r = await client.compact('ns1', true);
+    expect(r.job_id).toBe('j1');
+    expect(call().url).toBe('http://localhost:3000/ops/compact');
+    expect(JSON.parse(call().init.body as string)).toEqual({ namespace: 'ns1', force: true });
+  });
+
+  it('exportAudit GETs /v1/audit/export (json) and maps jsonl to json', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ events: [{ id: 1, event_type: 'store', agent_id: 'a', timestamp: 5 }], count: 1 }));
+    const r = await client.exportAudit({ format: 'jsonl', agentId: 'a', fromTs: 1, toTs: 9, limit: 10 });
+    expect(call().init.method).toBe('GET');
+    const u = new URL(call().url);
+    expect(u.pathname).toBe('/v1/audit/export');
+    expect(Object.fromEntries(u.searchParams)).toEqual({ format: 'json', agent_id: 'a', from: '1', to: '9', limit: '10' });
+    expect(r.count).toBe(1);
+    expect(r.events?.[0].agent_id).toBe('a');
+    expect(JSON.parse(r.data)).toHaveLength(1);
+  });
+
+  it('exportAudit returns the CSV text and a row count', async () => {
+    mockFetch.mockResolvedValueOnce(ok('id,event_type\n1,store\n2,recall\n', 'text/csv; charset=utf-8'));
+    const r = await client.exportAudit({ format: 'csv' });
+    expect(r.format).toBe('csv');
+    expect(r.count).toBe(2);
+    expect(r.data).toContain('2,recall');
+  });
+
+  it('listAuditEvents returns the server shape {events, count}', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ events: [], count: 0 }));
+    const r = await client.listAuditEvents({ agentId: 'a' });
+    expect(r.count).toBe(0);
+    expect(call().url).toContain('/v1/audit?agent_id=a');
+  });
+
+  it('no longer exposes methods whose routes the server never served', () => {
+    for (const name of ['fetch', 'flush', 'configureTtl', 'listExtractProviders']) {
+      expect((client as unknown as Record<string, unknown>)[name]).toBeUndefined();
+    }
+  });
+});

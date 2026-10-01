@@ -109,11 +109,9 @@ import type {
   TextUpsertOptions,
   TextUpsertResponse,
   ThroughputAnalytics,
-  TtlConfig,
   UpdateImportanceRequest,
   UpdateMemoryRequest,
   UpsertResponse,
-  Vector,
   VectorInput,
   WakeUpOptions,
   WakeUpResponse,
@@ -176,7 +174,6 @@ import type {
   AuditExportResponse,
   // EXT-1
   ExtractionResult,
-  ExtractionProviderInfo,
   // CE-54
   FulltextReindexResponse,
   // SEC-3
@@ -215,6 +212,8 @@ import type {
   QuotaStatus,
   SetQuotaRequest,
   SetQuotaResponse,
+  QuotaConfig,
+  AuditEvent,
   QuotaCheckRequest,
   QuotaCheckResult,
   BackupListResponse,
@@ -780,33 +779,6 @@ export class DakeraClient {
   }
 
   /**
-   * Fetch vectors by ID.
-   *
-   * @param namespace - Target namespace
-   * @param ids - Vector IDs to fetch
-   * @param options - Fetch options
-   * @returns Fetched vectors
-   */
-  async fetch(
-    namespace: string,
-    ids: string[],
-    options: { includeValues?: boolean; includeMetadata?: boolean } = {}
-  ): Promise<Vector[]> {
-    const body = {
-      ids,
-      include_values: options.includeValues ?? true,
-      include_metadata: options.includeMetadata ?? true,
-    };
-
-    const response = await this.request<{ vectors: Vector[] }>(
-      'POST',
-      `/v1/namespaces/${namespace}/fetch`,
-      body
-    );
-    return response.vectors;
-  }
-
-  /**
    * Execute multiple queries in a single request.
    *
    * @param namespace - Target namespace
@@ -1111,31 +1083,34 @@ export class DakeraClient {
   /**
    * Get index statistics for a namespace.
    *
+   * Reads `GET /v1/admin/indexes/stats` (Admin scope) and picks the namespace
+   * out of its per-namespace map — the server has no per-namespace stats route.
+   *
    * @param namespace - Namespace name
-   * @returns Index statistics
+   * @throws NotFoundError when the server reports no index for the namespace
    */
   async getIndexStats(namespace: string): Promise<IndexStats> {
-    return this.request<IndexStats>('GET', `/v1/namespaces/${namespace}/stats`);
+    const resp = await this.request<{ namespaces?: Record<string, IndexStats> }>(
+      'GET',
+      '/v1/admin/indexes/stats'
+    );
+    const stats = resp.namespaces?.[namespace];
+    if (!stats) {
+      throw new NotFoundError(`No index statistics for namespace '${namespace}'`, 404, resp, ErrorCode.NAMESPACE_NOT_FOUND);
+    }
+    return stats;
   }
 
   /**
-   * Trigger compaction for a namespace.
+   * Trigger storage compaction for a namespace (`POST /ops/compact`, Admin
+   * scope). Starts a background job: poll it with `opsGetJob(job_id)`. A
+   * backend without on-request compaction answers 501 (NotImplementedError).
    *
    * @param namespace - Namespace name
-   * @returns Compaction status
+   * @param force - compact every segment holding garbage, ignoring the backend's threshold
    */
-  async compact(namespace: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/namespaces/${namespace}/compact`);
-  }
-
-  /**
-   * Flush pending writes for a namespace.
-   *
-   * @param namespace - Namespace name
-   * @returns Flush status
-   */
-  async flush(namespace: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/namespaces/${namespace}/flush`);
+  async compact(namespace: string, force?: boolean): Promise<CompactionResponse> {
+    return this.opsCompact({ namespace, ...(force !== undefined ? { force } : {}) });
   }
 
   // ===========================================================================
@@ -1734,9 +1709,17 @@ export class DakeraClient {
     return this.request<Memory>('GET', `/v1/memory/get/${memoryId}?agent_id=${encodeURIComponent(agentId)}`);
   }
 
-  /** Update an existing memory */
-  async updateMemory(_agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<StoreMemoryResponse> {
-    return this.request<StoreMemoryResponse>('PUT', `/v1/memory/update/${memoryId}`, request);
+  /**
+   * Update an existing memory (`PUT /v1/memory/update/{id}?agent_id=...`). The
+   * server requires `agent_id` in the query string and answers with the updated
+   * `Memory`.
+   */
+  async updateMemory(agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<Memory> {
+    return this.request<Memory>(
+      'PUT',
+      `/v1/memory/update/${encodeURIComponent(memoryId)}?agent_id=${encodeURIComponent(agentId)}`,
+      request
+    );
   }
 
   /** Delete a memory */
@@ -2607,9 +2590,22 @@ export class DakeraClient {
     return this.request<Record<string, unknown>>('GET', '/v1/admin/quotas');
   }
 
-  /** Update quota settings */
-  async updateQuotas(quotas: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('PUT', '/v1/admin/quotas', quotas);
+  /**
+   * Update quota settings: the DEFAULT quota (`PUT /admin/quotas/default`), or
+   * one namespace's quota (`PUT /admin/quotas/{namespace}`) when `namespace`
+   * is given. Pass a `QuotaConfig` (`max_vectors`, `max_storage_bytes`,
+   * `max_dimensions`, `max_metadata_bytes`, `enforcement`) or the wrapped
+   * `{ config }` body. The server has no `PUT /admin/quotas`.
+   */
+  async updateQuotas(
+    quotas: QuotaConfig | { config?: QuotaConfig },
+    namespace?: string,
+  ): Promise<SetQuotaResponse> {
+    const body = 'config' in quotas ? quotas : { config: quotas };
+    const path = namespace
+      ? `/v1/admin/quotas/${encodeURIComponent(namespace)}`
+      : '/v1/admin/quotas/default';
+    return this.request<SetQuotaResponse>('PUT', path, body);
   }
 
   /** Get slow queries */
@@ -2639,13 +2635,6 @@ export class DakeraClient {
   /** Delete a backup */
   async deleteBackup(backupId: string): Promise<{ status: string }> {
     return this.request<{ status: string }>('DELETE', `/v1/admin/backups/${backupId}`);
-  }
-
-  /** Configure TTL for a namespace */
-  async configureTtl(namespace: string, ttlSeconds: number, strategy?: string): Promise<TtlConfig> {
-    const body: Record<string, unknown> = { ttl_seconds: ttlSeconds };
-    if (strategy) body.strategy = strategy;
-    return this.request<TtlConfig>('POST', `/v1/admin/namespaces/${namespace}/ttl`, body);
   }
 
   /** Get AutoPilot status: current config and last-run statistics (PILOT-1) */
@@ -3135,10 +3124,9 @@ export class DakeraClient {
    *
    * @param agentId   Filter to events from this agent.
    * @param eventType Filter to a specific event type string.
-   * @param fromTs    Unix timestamp lower bound (inclusive).
-   * @param toTs      Unix timestamp upper bound (exclusive).
+   * @param fromTs    Unix millisecond lower bound (inclusive).
+   * @param toTs      Unix millisecond upper bound (inclusive).
    * @param limit     Maximum number of events to return.
-   * @param cursor    Pagination cursor from a previous response.
    */
   async listAuditEvents(opts?: {
     agentId?: string;
@@ -3146,7 +3134,6 @@ export class DakeraClient {
     fromTs?: number;
     toTs?: number;
     limit?: number;
-    cursor?: string;
   }): Promise<AuditListResponse> {
     const params = new URLSearchParams();
     if (opts?.agentId) params.set('agent_id', opts.agentId);
@@ -3154,7 +3141,6 @@ export class DakeraClient {
     if (opts?.fromTs !== undefined) params.set('from', String(opts.fromTs));
     if (opts?.toTs !== undefined) params.set('to', String(opts.toTs));
     if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
-    if (opts?.cursor) params.set('cursor', opts.cursor);
     const qs = params.toString();
     return this.request<AuditListResponse>('GET', qs ? `/v1/audit?${qs}` : '/v1/audit');
   }
@@ -3181,27 +3167,41 @@ export class DakeraClient {
   }
 
   /**
-   * Bulk-export audit log entries (OBS-1).
+   * Bulk-export audit log entries (`GET /v1/audit/export`, Admin scope).
    *
-   * @param format    `"jsonl"` (default) or `"csv"`.
+   * @param format    `"json"` (default; `"jsonl"` is accepted as an alias) or `"csv"`.
    * @param agentId   Filter to a specific agent.
    * @param eventType Filter to a specific event type.
-   * @param fromTs    Unix timestamp lower bound.
-   * @param toTs      Unix timestamp upper bound.
+   * @param fromTs    Unix MILLISECOND lower bound (inclusive).
+   * @param toTs      Unix MILLISECOND upper bound (inclusive).
+   * @param limit     Maximum rows (server default 10 000).
+   * @returns `data` is the raw export text (CSV, or the JSON events serialised);
+   *   `events` is set for the JSON format.
    */
   async exportAudit(opts?: {
-    format?: 'jsonl' | 'csv';
+    format?: 'json' | 'jsonl' | 'csv';
     agentId?: string;
     eventType?: string;
     fromTs?: number;
     toTs?: number;
+    limit?: number;
   }): Promise<AuditExportResponse> {
-    const body: Record<string, unknown> = { format: opts?.format ?? 'jsonl' };
-    if (opts?.agentId) body.agent_id = opts.agentId;
-    if (opts?.eventType) body.event_type = opts.eventType;
-    if (opts?.fromTs !== undefined) body.from = opts.fromTs;
-    if (opts?.toTs !== undefined) body.to = opts.toTs;
-    return this.request<AuditExportResponse>('POST', '/v1/audit/export', body);
+    const format = opts?.format === 'csv' ? 'csv' : 'json';
+    const params = new URLSearchParams({ format });
+    if (opts?.agentId) params.set('agent_id', opts.agentId);
+    if (opts?.eventType) params.set('event_type', opts.eventType);
+    if (opts?.fromTs !== undefined) params.set('from', String(opts.fromTs));
+    if (opts?.toTs !== undefined) params.set('to', String(opts.toTs));
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    const body = await this.request<unknown>('GET', `/v1/audit/export?${params.toString()}`);
+    if (format === 'csv') {
+      const text = typeof body === 'string' ? body : '';
+      const lines = text.split('\n').filter((l) => l.length > 0);
+      return { format, data: text, count: Math.max(0, lines.length - 1) };
+    }
+    const doc = (typeof body === 'object' && body !== null ? body : {}) as { events?: AuditEvent[]; count?: number };
+    const events = doc.events ?? [];
+    return { format, data: JSON.stringify(events), count: doc.count ?? events.length, events };
   }
 
   // ===========================================================================
@@ -3230,16 +3230,6 @@ export class DakeraClient {
     if (provider !== undefined) body.provider = provider;
     if (model !== undefined) body.model = model;
     return this.request<ExtractionResult>('POST', '/v1/extract', body);
-  }
-
-  /**
-   * List available extraction providers and their supported models (EXT-1).
-   */
-  async listExtractProviders(): Promise<ExtractionProviderInfo[]> {
-    const result = await this.request<ExtractionProviderInfo[] | { providers: ExtractionProviderInfo[] }>(
-      'GET', '/v1/extract/providers',
-    );
-    return Array.isArray(result) ? result : result.providers;
   }
 
   /**

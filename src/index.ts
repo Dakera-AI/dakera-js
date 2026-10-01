@@ -214,7 +214,6 @@ export type {
   CacheStats,
   SlowQuery,
   BackupInfo,
-  TtlConfig,
   // AutoPilot types (PILOT-1/2/3)
   AutoPilotConfig,
   DedupResultSnapshot,
@@ -312,7 +311,6 @@ export type {
   AuditExportResponse,
   // External Extraction Providers (EXT-1)
   ExtractionResult,
-  ExtractionProviderInfo,
   // AES-256-GCM Encryption Key Rotation (SEC-3)
   RotateEncryptionKeyRequest,
   RotateEncryptionKeyResponse,

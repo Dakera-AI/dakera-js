@@ -63,6 +63,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the merging `PATCH` (`configureNamespaceNer`) no longer can (server TRACKER K34).
   - `ServerCapabilities` gains `scoring`, `attachments`, `vision` and `unreadable_records`.
 
+### Fixed
+
+- **Route sweep against the v0.12.0 router** (`crates/api/src/lib.rs`): all 182 `request()` call sites
+  were diffed (method + path; `/admin/*` is also served as `/v1/admin/*`). 8 called routes the server
+  does not serve (none of them existed in v0.11.108 either); `src/routes.test.ts` now keeps a
+  snapshot of the router and fails if an SDK call has no route.
+  - `updateQuotas()` called `PUT /v1/admin/quotas`. It now calls `PUT /admin/quotas/default`, or
+    `PUT /admin/quotas/{namespace}` when a namespace is passed, with the `{ config }` body.
+  - `getIndexStats(ns)` (`GET /v1/namespaces/{ns}/stats`) now reads `GET /admin/indexes/stats` and picks
+    the namespace; `compact(ns)` (`POST /v1/namespaces/{ns}/compact`) now calls `POST /ops/compact`
+    (returns `CompactionResponse`, accepts `force`).
+  - `exportAudit()` sent `POST /v1/audit/export`; the route is `GET` with query parameters and
+    answers `json` or `csv` (`jsonl` is mapped to `json`). `AuditEvent` / `AuditListResponse` now match
+    the server rows (`id: number`, `agent_id`, `memory_id`, `session_id`, `importance`, millisecond
+    `timestamp`; list returns `{ events, count }`, no cursor).
+  - `updateMemory()` now sends the `agent_id` query parameter the server requires and returns the
+    updated `Memory`; `UpdateMemoryRequest` gains `importance` and `tags`.
+  - Verified unchanged: the typed `admin*Quota` methods, admin keys, memory/session/agent/analytics,
+    SSE and ops routes, and the `QuotaConfig`/`QuotaStatus`/`IndexStats` shapes.
+
+### Removed
+
+- `fetch()` (`POST /v1/namespaces/{ns}/fetch`), `flush()` (`.../flush`), `configureTtl()`
+  (`POST /v1/admin/namespaces/{ns}/ttl`) and `listExtractProviders()` (`GET /v1/extract/providers`):
+  the server has no such routes (vectors have no by-id read route; set TTLs through
+  `PUT /v1/namespaces/{ns}/memory_policy`). They could only ever return 404/405. Types `TtlConfig` and
+  `ExtractionProviderInfo` removed with them.
+
 ### Changed
 
 - Version 0.11.107 → 0.12.0 (SDK line now tracks server v0.12).
