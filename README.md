@@ -49,7 +49,7 @@ curl http://localhost:3000/health  # → {"status":"ok"}
 For persistent storage with Docker Compose:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker-compose.yml \
+curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker/docker-compose.yml \
   -o docker-compose.yml
 DAKERA_API_KEY=dk-mykey docker compose up -d
 ```
@@ -130,8 +130,8 @@ for await (const event of stream) {
 This SDK release (0.12.0) targets Dakera server **v0.12.0** and is **compatible with both v0.11.108
 and v0.12.0 servers**: every addition is opt-in or additive, requests that do not use them are
 byte-identical to before, and the v0.12-only routes simply answer 404/501 on an older server.
-Upgrade guide for operators: [server `docs/v0.12/UPGRADE.md`](https://github.com/Dakera-AI/dakera/blob/main/docs/v0.12/UPGRADE.md)
-(release notes: [`RELEASE_NOTES.md`](https://github.com/Dakera-AI/dakera/blob/main/docs/v0.12/RELEASE_NOTES.md)).
+Upgrade guide for operators: `docs/v0.12/UPGRADE.md` in the server release (the server repository is private;
+see the public [Dakera changelog](https://dakera.ai/docs/changelog) for release notes).
 
 - **Capabilities** — `client.capabilities()` (`GET /v1/capabilities`): models (`bge-m3`, `colbert-small`),
   index kinds (`ivfpq`), search modes (`rabitq`), record kinds/dtypes, query languages, and the
@@ -232,7 +232,7 @@ npx tsx examples/basic.ts
 | | |
 |---|---|
 | [Documentation](https://dakera.ai/docs) | Full API reference and guides |
-| [TypeScript SDK docs](https://dakera.ai/docs/sdk/typescript) | TypeScript-specific reference |
+| [TypeScript SDK docs](https://dakera.ai/docs/typescript-sdk) | TypeScript-specific reference |
 | [Benchmark](https://dakera.ai/benchmark) | LoCoMo evaluation results |
 | [dakera.ai](https://dakera.ai) | Website and early access |
 | [GitHub Org](https://github.com/dakera-ai) | All public repos |
