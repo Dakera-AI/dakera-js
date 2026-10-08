@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-10-08
+
+Server v0.12.2 support (Dakera-AI/dakera#916). Compatible with v0.12.0 and v0.12.1 servers: new
+request fields are left out when unset (`namespaces: null` on a key PATCH is the one deliberate
+`null`), new response fields are optional, and the new routes answer 404/405 on an older server.
+The behaviour changes a v0.12.2 server brings are listed in the README ("Behaviour changes you may
+hit with a v0.12.2 server").
+
+### Added
+
+- **`createAgent(agentId)`** — `POST /v1/agents`: creates the agent's memory namespace before its
+  first memory. `CreateAgentResponse` (`agent_id`, `namespace`, `created`, `dimension`, `model`);
+  `created: false` for an existing agent, which is left untouched.
+- **`updateKey(keyId, { name?, namespaces? })`** — `PATCH /admin/keys/{id}`, and
+  **`updateNamespaceKey(namespace, keyId, …)`** — `PATCH /v1/namespaces/{ns}/keys/{id}`. Both return
+  `KeyInfo`. Only the given fields are sent; `namespaces: null` (every namespace) is sent as `null`.
+- **`rotateKey(keyId, { grace_secs })`** — the old key keeps working until `old_key_expires_at`;
+  `RotateKeyResponse` gains `old_key_id` and `old_key_expires_at`. Without options no body is sent,
+  as before.
+- **`whoami()`** — `GET /v1/auth/whoami` (`WhoamiResponse`: scope, namespaces, `unrestricted`,
+  `expires_at`, `grants_version`, `inert_namespaces`, `auth_enabled`).
+- `KeyInfo` type (the server's key shape) with `grants_version` and `inert_namespaces`; the same
+  optional fields on `ApiKey` and `NamespaceKeyInfo`. `CreateKeyRequest` gains `scope`,
+  `namespaces` and `expires_in_days`; `createNamespaceKey()` accepts
+  `{ scope, extra_namespaces, expires_in_days }` as its third argument (a number still means
+  `expires_in_days`).
+- Namespace kinds: `NamespaceInfo.kind` (`agent` | `data` | `system`, widened), filled by
+  `getNamespace()` and by `listNamespaces()` from the server's `kinds` map; `KNOWN_NAMESPACE_KINDS`,
+  `isKnownNamespaceKind()`.
+- `capabilities()` v2: optional `auth` (`prefix_patterns`, `sessions_by_agent`, `key_update`,
+  `rotation_grace_max_secs`, `max_grants`, `max_grant_len`), `naming` (agent id / namespace rules,
+  internal namespaces) and `sessions` (`idle_timeout_secs`, `max_idle_timeout_secs`, `touch`,
+  `ended_reason`) blocks; `undefined` against an older server.
+- Sessions: `startSession(agentId, metadata?, { id?, idle_timeout_secs? })`;
+  **`touchSession(id)`** — `POST /v1/sessions/{id}/touch` (`SessionTouchResponse`:
+  `session_state`, `idle_deadline_at`); `endSession(id, { summary?, auto_summarize? })`;
+  `Session` gains `last_activity_at`, `ended_reason` (`client` | `idle`), `idle_since` and
+  `idle_timeout_secs`; `StoreMemoryResponse.session_state`; `BatchStoreMemoryResponse.ended_sessions`.
+- `getConfig()` / `updateConfig()` are typed as `AdminConfig`, with `session_idle_timeout_secs`
+  and `runtime_overrides` (other fields kept as before).
+- Listings: `agentMemories()` accepts `offset`, `include_derived` and `content_preview_chars`;
+  `sessionMemories(id, { limit?, offset?, content_preview_chars? })`;
+  `getWakeUpContext()` accepts `include_derived`; `fullKnowledgeGraph()` and `crossAgentNetwork()`
+  accept `content_preview_chars`. Items and graph nodes gain `content_len` and `content_truncated`;
+  the full graph's `stats` is typed (`FullKnowledgeGraphStats`).
+- **`adminDerivationStatus()`** — `GET /admin/derivations/status`, and
+  **`adminDrainDerivations({ timeout_secs? })`** — `POST /admin/derivations/drain`
+  (`DerivationStatus`, `DrainDerivationsResponse`).
+- `DeduplicateResponse` gains `duplicates_merged` and `duplicates_skipped_changed`;
+  `CompressResponse` gains the server's counts (`memories_scanned`, `clusters_found`,
+  `summaries_created`, `originals_deprecated`, `summary_ids`, `deprecated_ids`) and
+  `summaries_skipped`.
+- `unavailable: UnavailableNamespace[]` on `OpsStats`, `ClusterStatus`, `ShardListResponse`,
+  `TtlStatsResponse`, `StorageTierOverview`, `MemoryTypeStatsResponse`, `AnalyticsOverview` and
+  `StorageAnalytics`; `AgentSummary` gains `vector_count` and `unavailable`.
+
+### Changed
+
+- `rotateKey()` returns `RotateKeyResponse` (`new_key`, `key_id` of the NEW key, `warning`, …),
+  the shape every server sends; it was typed as `ApiKey`, whose fields the answer never had.
+
+### Fixed
+
+- `listSessions()`, `sessionMemories()` and `listKeys()` unwrap the server's
+  `{sessions, total}`, `{session, memories, total}` and `{keys, total}` answers (they returned the
+  wrapper object instead of an array). A bare array is still accepted.
+
+### Tests
+
+- `src/v0122.test.ts`: request bodies and query strings (unset fields omitted, `null` kept where
+  it means something) and the server's response shapes for every addition above.
+- `src/routes.test.ts` knows the seven routes v0.12.2 adds.
+- `src/integration.test.ts`: session and listing round trip on any 0.12.x server, and a v0.12.2
+  block (whoami, createAgent, idle timeout / touch / end, content preview) that returns early on an
+  older server.
+
 ## [0.12.1] - 2026-10-01
 
 Fixes the knowledge-graph calls against the real server contract (checked live against

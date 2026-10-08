@@ -228,11 +228,46 @@ export interface SearchResult {
   has_more?: boolean;
 }
 
+/** Known namespace kinds (server v0.12.2+). */
+export type KnownNamespaceKind = 'agent' | 'data' | 'system';
+
+/**
+ * What a namespace is (server v0.12.2+): `agent` (an agent's memory namespace,
+ * `_dakera_agent_<id>`), `data` (a client namespace) or `system`
+ * (server-internal, only on `/admin/namespaces`). Widened so a newer server's
+ * kind type-checks.
+ */
+export type NamespaceKind = KnownNamespaceKind | (string & {});
+
+/** Runtime list of the namespace kinds this SDK declares. */
+export const KNOWN_NAMESPACE_KINDS: readonly KnownNamespaceKind[] = ['agent', 'data', 'system'];
+
+/** Whether `value` is a namespace kind this SDK declares. */
+export function isKnownNamespaceKind(value: unknown): value is KnownNamespaceKind {
+  return (KNOWN_NAMESPACE_KINDS as readonly unknown[]).includes(value);
+}
+
 /** Information about a namespace */
 export interface NamespaceInfo {
   namespace: string;
   vector_count: number;
   dimension?: number;
+  /**
+   * Server v0.12.2+: what the namespace is (`GET /v1/namespaces/{ns}` `kind`,
+   * and the `kinds` map of `GET /v1/namespaces`). Absent on older servers.
+   */
+  kind?: NamespaceKind;
+}
+
+/**
+ * A namespace a node-wide endpoint left out of its answer (server v0.12.2+):
+ * it errored or did not answer within the per-namespace deadline (2 s). Its
+ * records are not in the totals of that response. `reason` never carries
+ * paths, URLs or credentials.
+ */
+export interface UnavailableNamespace {
+  namespace: string;
+  reason: string;
 }
 
 /** Index statistics */
@@ -622,7 +657,10 @@ export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'strategic';
 
 /** Request to store a memory */
 export interface StoreMemoryRequest {
-  /** Memory content */
+  /**
+   * Memory content. Server v0.12.2 limits it in UTF-8 **bytes**
+   * (`DAKERA_MAX_MEMORY_CONTENT_BYTES`, default 100000; 400 above).
+   */
   content: string;
   /** Type of memory */
   memory_type?: MemoryType;
@@ -684,6 +722,17 @@ export interface Memory {
   updated_at?: string;
   /** Access count */
   access_count?: number;
+  /**
+   * Server v0.12.2+, listings asked with `content_preview_chars` only: length
+   * of the FULL content in characters (Unicode scalar values).
+   */
+  content_len?: number;
+  /**
+   * Server v0.12.2+, listings asked with `content_preview_chars` only: whether
+   * `content` is a cut preview. Read the whole memory with `getMemory()` when
+   * true.
+   */
+  content_truncated?: boolean;
 }
 
 /** A recalled memory with similarity score */
@@ -712,6 +761,16 @@ export interface RecalledMemory {
   vector_score?: number;
   /** Hybrid sub-score: BM25 text component (server v0.11.98+, absent when vector-only) */
   text_score?: number;
+  /**
+   * Server v0.12.2+, `agentMemories()` / `sessionMemories()` with
+   * `content_preview_chars` only: length of the FULL content in characters.
+   */
+  content_len?: number;
+  /**
+   * Server v0.12.2+, with `content_preview_chars` only: whether `content` is a
+   * cut preview (read the whole memory with `getMemory()` when true).
+   */
+  content_truncated?: boolean;
 }
 
 /** COG-2 / KG-3: Response from the recall endpoint with optional associative memories */
@@ -732,6 +791,13 @@ export interface StoreMemoryResponse {
   memory: Memory;
   /** Embedding latency in milliseconds */
   embedding_time_ms?: number;
+  /**
+   * Server v0.12.2+: state of the session the memory was stored with (the
+   * given `session_id`, or the agent's active session the server resolved).
+   * `"ended"` means the store succeeded into a session that had already ended
+   * (for example after the idle timeout). Absent without a started session.
+   */
+  session_state?: SessionState;
 }
 
 /** Request to update a memory */
@@ -877,7 +943,55 @@ export interface StartSessionRequest {
   agent_id: AgentId;
   /** Optional session metadata */
   metadata?: Record<string, unknown>;
+  /** Optional caller-chosen session id */
+  id?: string;
+  /**
+   * Server v0.12.2+: this session's idle timeout in seconds. `0` = never
+   * ended for inactivity; at most 2592000 (30 days, 400 above). Omitted: the
+   * server's timeout applies (`capabilities.sessions.idle_timeout_secs`,
+   * 4 hours by default).
+   */
+  idle_timeout_secs?: number;
 }
+
+/** Options for {@link DakeraClient.startSession} beyond the agent and metadata. */
+export interface StartSessionOptions {
+  /** Caller-chosen session id (the server generates one when omitted). */
+  id?: string;
+  /**
+   * Server v0.12.2+: idle timeout in seconds for this session (`0` = never
+   * ended for inactivity, at most 2592000). Omitted: the server's timeout.
+   * Not sent when undefined.
+   */
+  idle_timeout_secs?: number;
+}
+
+/** Options for {@link DakeraClient.endSession}. */
+export interface EndSessionOptions {
+  /**
+   * Summary stored on the session. Server v0.12.2+ refuses a summary above the
+   * memory content limit (`DAKERA_MAX_MEMORY_CONTENT_BYTES`, bytes) with 400.
+   * Ignored when the session has already ended.
+   */
+  summary?: string;
+  /** Let the server generate the summary from the session's memories. */
+  auto_summarize?: boolean;
+}
+
+/** Known values of {@link Session.ended_reason}. */
+export type KnownSessionEndedReason = 'client' | 'idle';
+
+/**
+ * Who ended a session (server v0.12.2+): `client` (`POST /v1/sessions/{id}/end`)
+ * or `idle` (the server, after the idle timeout).
+ */
+export type SessionEndedReason = KnownSessionEndedReason | (string & {});
+
+/** Known values of a session state on store / touch responses. */
+export type KnownSessionState = 'active' | 'ended';
+
+/** State of a session as the server reports it on store and touch responses (v0.12.2+). */
+export type SessionState = KnownSessionState | (string & {});
 
 /** A session */
 export interface Session {
@@ -895,6 +1009,22 @@ export interface Session {
   metadata?: Record<string, unknown>;
   /** Number of memories stored in this session */
   memory_count?: number;
+  /**
+   * Server v0.12.2+: the last activity the server knows of (Unix seconds): a
+   * memory stored / updated / imported with the session, a session-scoped
+   * recall or search, or `touchSession()`. Sessions written before v0.12.2
+   * read their `started_at`.
+   */
+  last_activity_at?: number;
+  /** Server v0.12.2+: who ended the session (`client` or `idle`). Absent while open. */
+  ended_reason?: SessionEndedReason;
+  /** Server v0.12.2+: for `ended_reason: "idle"`, the last activity it was idle since (Unix seconds). */
+  idle_since?: number;
+  /**
+   * Server v0.12.2+: the session's own idle timeout, when it set one at start
+   * (`0` = never ended for inactivity). Absent: the server's timeout applies.
+   */
+  idle_timeout_secs?: number;
 }
 
 /** Response from POST /v1/sessions/start */
@@ -908,6 +1038,19 @@ export interface SessionEndResponse {
   memory_count: number;
 }
 
+/** Response from `POST /v1/sessions/{id}/touch` (server v0.12.2+). */
+export interface SessionTouchResponse {
+  /** The session; `last_activity_at` raised to now when it is open. */
+  session: Session;
+  /** `"active"`, or `"ended"` — a touch never re-opens an ended session. */
+  session_state: SessionState;
+  /**
+   * When the server ends the session if nothing else happens (Unix seconds).
+   * Absent when the session never times out or has ended.
+   */
+  idle_deadline_at?: number;
+}
+
 /** Options for listing sessions */
 export interface ListSessionsOptions {
   /** Filter by agent ID */
@@ -918,6 +1061,39 @@ export interface ListSessionsOptions {
   limit?: number;
   /** Result offset */
   offset?: number;
+}
+
+/** Options for {@link DakeraClient.sessionMemories}. */
+export interface SessionMemoriesOptions {
+  /** Page size (server default 50). */
+  limit?: number;
+  /** Page offset. */
+  offset?: number;
+  /**
+   * Server v0.12.2+: cut each memory's `content` to this many characters
+   * (1..=10000, 400 outside) and add `content_len` / `content_truncated`.
+   */
+  content_preview_chars?: number;
+}
+
+/** Options for {@link DakeraClient.agentMemories}. */
+export interface AgentMemoriesOptions {
+  /** Not a server filter on `GET /v1/agents/{id}/memories`; kept for compatibility. */
+  memory_type?: string;
+  /** Page size (server default 50, at most 1000). */
+  limit?: number;
+  /** Page offset (counts memories; derived records are not counted unless `include_derived`). */
+  offset?: number;
+  /**
+   * Server v0.12.2+: also list derived records (CE-31 sentence sub-memories),
+   * which the listing leaves out by default. Not sent when undefined.
+   */
+  include_derived?: boolean;
+  /**
+   * Server v0.12.2+: cut each memory's `content` to this many characters
+   * (1..=10000, 400 outside) and add `content_len` / `content_truncated`.
+   */
+  content_preview_chars?: number;
 }
 
 // =============================================================================
@@ -934,6 +1110,39 @@ export interface AgentSummary {
   session_count: number;
   /** Active session count */
   active_sessions: number;
+  /**
+   * Records in the agent's memory namespace (memories, sub-memories and
+   * bookkeeping records). Server v0.12.2 no longer counts the namespace seed,
+   * so an empty agent reports 0.
+   */
+  vector_count?: number;
+  /**
+   * Server v0.12.2+: why `vector_count` is unknown (`0`) — the agent's
+   * namespace could not be counted in time. Absent when it was counted.
+   */
+  unavailable?: string;
+}
+
+/** Request for `POST /v1/agents` (server v0.12.2+). */
+export interface CreateAgentRequest {
+  /**
+   * Agent id: `^[a-zA-Z0-9][a-zA-Z0-9_\-.]*$`, at most 241 bytes, not starting
+   * with `_dakera_`.
+   */
+  agent_id: string;
+}
+
+/** Response from `POST /v1/agents` (server v0.12.2+). */
+export interface CreateAgentResponse {
+  agent_id: AgentId;
+  /** The agent's memory namespace (`_dakera_agent_<agent_id>`). */
+  namespace: string;
+  /** `true` (HTTP 201) when created; `false` (HTTP 200) when it already existed and was left untouched. */
+  created: boolean;
+  /** Dimension of the namespace's vectors (`null` if it cannot be read). */
+  dimension: number | null;
+  /** The embedding model the agent's memories are embedded with. */
+  model: EmbeddingModel;
 }
 
 /** Detailed stats for an agent */
@@ -962,6 +1171,11 @@ export interface WakeUpOptions {
   top_n?: number;
   /** Only return memories with importance ≥ this value (default 0.0) */
   min_importance?: number;
+  /**
+   * Server v0.12.2+: also rank derived records (CE-31 sentence sub-memories),
+   * which wake-up leaves out by default. Not sent when undefined.
+   */
+  include_derived?: boolean;
 }
 
 /**
@@ -999,6 +1213,30 @@ export interface CompressResponse {
   removed_count: number;
   /** Wall-clock duration of the compression pass in milliseconds */
   duration_ms?: number;
+  /** Memories the server scanned. */
+  memories_scanned?: number;
+  /** Clusters found. */
+  clusters_found?: number;
+  /** Summaries written (server v0.12.2: what was actually written). */
+  summaries_created?: number;
+  /** Originals deprecated (server v0.12.2: only those of written summaries). */
+  originals_deprecated?: number;
+  /** Ids of the summaries written. */
+  summary_ids?: string[];
+  /** Ids of the originals deprecated. */
+  deprecated_ids?: string[];
+  /**
+   * Server v0.12.2+: summaries refused by validation or not storable; the
+   * originals of their clusters were NOT deprecated.
+   */
+  summaries_skipped?: CompressSkippedSummary[];
+}
+
+/** A summary `compressAgent()` did not write (server v0.12.2+). */
+export interface CompressSkippedSummary {
+  summary_id: string;
+  /** Why, e.g. a `content: … bytes …` validation message. */
+  reason: string;
 }
 
 // =============================================================================
@@ -1020,6 +1258,21 @@ export interface KnowledgeNode {
   memory_type?: string;
   importance?: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Full graph, server v0.12.2+: length of the FULL content in characters
+   * (Unicode scalar values), whether or not a preview was asked for.
+   */
+  content_len?: number;
+  /** Full graph, server v0.12.2+: whether `content` was cut to `content_preview_chars`. */
+  content_truncated?: boolean;
+  /** Full graph: the memory's tags. */
+  tags?: string[];
+  /** Full graph: creation time (string seconds) or null. */
+  created_at?: string | null;
+  /** Full graph: cluster the node belongs to. */
+  cluster_id?: number;
+  /** Full graph: centrality of the node. */
+  centrality?: number;
 }
 
 /** An edge in the knowledge graph */
@@ -1035,6 +1288,22 @@ export interface KnowledgeGraphResponse {
   nodes: KnowledgeNode[];
   edges: KnowledgeEdge[];
   clusters?: string[][];
+  /** Full graph: graph statistics. */
+  stats?: FullKnowledgeGraphStats;
+}
+
+/** Statistics of `POST /v1/knowledge/graph/full`. */
+export interface FullKnowledgeGraphStats {
+  /**
+   * User memories of the agent (server v0.12.2: no sentence sub-memories, no
+   * namespace seed — the same count as `listAgents()` `memory_count`).
+   */
+  total_memories: number;
+  included_memories: number;
+  total_edges: number;
+  cluster_count: number;
+  density: number;
+  hub_memory_id: string | null;
 }
 
 /** Request for full knowledge graph */
@@ -1044,6 +1313,11 @@ export interface FullKnowledgeGraphRequest {
   min_similarity?: number;
   cluster_threshold?: number;
   max_edges_per_node?: number;
+  /**
+   * Server v0.12.2+: cut each node's `content` to this many characters
+   * (1..=10000, 400 outside). Omitted: full content.
+   */
+  content_preview_chars?: number;
 }
 
 /** Request to summarize memories */
@@ -1074,6 +1348,14 @@ export interface DeduplicateResponse {
   duplicates_found: number;
   removed_count: number;
   groups: string[][];
+  /** Duplicates merged (the server's name for the merged count). */
+  duplicates_merged?: number;
+  /**
+   * Server v0.12.2+: candidates not merged because the canonical memory or the
+   * duplicate changed (edited, expired, forgotten) between the scan and the
+   * write. Always 0 on a dry run.
+   */
+  duplicates_skipped_changed?: number;
 }
 
 // =============================================================================
@@ -1093,6 +1375,8 @@ export interface AnalyticsOverview {
   total_vectors: number;
   total_namespaces: number;
   uptime_seconds: number;
+  /** Server v0.12.2+: namespaces left out of the totals (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Latency analytics response */
@@ -1120,6 +1404,8 @@ export interface StorageAnalytics {
   index_bytes: number;
   data_bytes: number;
   by_namespace?: Record<string, { bytes: number; vector_count: number }>;
+  /** Server v0.12.2+: namespaces left out of the totals (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Options for analytics queries */
@@ -1452,6 +1738,10 @@ export interface AgentNetworkNode {
   id: string;
   agent_id: string;
   content: string;
+  /** Server v0.12.2+: length of the FULL content in characters (Unicode scalar values). */
+  content_len?: number;
+  /** Server v0.12.2+: whether `content` was cut to `content_preview_chars`. */
+  content_truncated?: boolean;
   importance: number;
   tags: string[];
   memory_type: string;
@@ -1498,6 +1788,11 @@ export interface CrossAgentNetworkRequest {
   min_importance?: number;
   /** Maximum cross-agent edges to return (default 200) */
   max_cross_edges?: number;
+  /**
+   * Server v0.12.2+: cut each node's `content` to this many characters
+   * (1..=10000, 400 outside). Omitted: full content.
+   */
+  content_preview_chars?: number;
 }
 
 // =============================================================================
@@ -1508,10 +1803,16 @@ export interface CrossAgentNetworkRequest {
 export interface OpsStats {
   version: string;
   total_vectors: number;
+  /** Still counts an unavailable namespace (server v0.12.2). */
   namespace_count: number;
   uptime_seconds: number;
   timestamp: number;
   state: string;
+  /**
+   * Server v0.12.2+: namespaces whose records are not in `total_vectors`
+   * (absent when every namespace answered).
+   */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Cluster status response */
@@ -1520,6 +1821,8 @@ export interface ClusterStatus {
   nodes: number;
   healthy: boolean;
   version?: string;
+  /** Server v0.12.2+: namespaces left out (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Cluster node info */
@@ -1721,13 +2024,126 @@ export interface ApiKey {
   created_at: string;
   expires_at?: string;
   active: boolean;
+  /** Key id as the server sends it (`dk_key_…`). See {@link KeyInfo}. */
+  key_id?: string;
+  /** Scope as the server sends it (`read`, `write`, `admin`, `super_admin`). */
+  scope?: string;
+  /** Namespace grants (`null` = every namespace). See {@link KeyInfo.namespaces}. */
+  namespaces?: string[] | null;
+  /** Server v0.12.2+: grant syntax version. See {@link KeyInfo.grants_version}. */
+  grants_version?: number;
+  /** Server v0.12.2+: grant entries that grant nothing. See {@link KeyInfo.inert_namespaces}. */
+  inert_namespaces?: string[];
 }
 
-/** Request to create an API key */
+/**
+ * An API key as the server describes it (`GET`/`PATCH /admin/keys/{id}`,
+ * `PATCH /v1/namespaces/{ns}/keys/{id}`, list items). Never holds the secret.
+ */
+export interface KeyInfo {
+  key_id: string;
+  name: string;
+  /** `read`, `write`, `admin` or `super_admin`. */
+  scope: string;
+  /**
+   * Namespace grants. `null` or `["*"]` = every namespace; `[]` = none. Server
+   * v0.12.2+ accepts prefix patterns `p*` (one trailing star after a non-empty
+   * prefix): `team-*` reaches `team-a` and `team-a.b`, not `team-` or `team`.
+   * A pattern never reaches a server-internal namespace.
+   */
+  namespaces: string[] | null;
+  /** Unix seconds. */
+  created_at: number;
+  /** Unix seconds, or null. */
+  expires_at: number | null;
+  active: boolean;
+  /**
+   * Server v0.12.2+: grant syntax version. `1` = patterns are active; `0` = a
+   * key created before v0.12.2, whose `foo*` entries are literal names that
+   * grant nothing until its `namespaces` are saved (PATCH). Absent on older
+   * servers.
+   */
+  grants_version?: number;
+  /**
+   * Server v0.12.2+: entries that grant nothing (a legacy `foo*`, or a
+   * server-internal name such as `_dakera_sessions`). Omitted when empty.
+   */
+  inert_namespaces?: string[];
+}
+
+/** Request to create an API key (`POST /admin/keys`). */
 export interface CreateKeyRequest {
   name: string;
   permissions?: string[];
   expires_at?: string;
+  /** Scope of the new key (`read`, `write`, `admin`, `super_admin`). */
+  scope?: string;
+  /**
+   * Namespace grants (`null` = every namespace, `[]` = none). Server v0.12.2+
+   * validates every entry (400 naming it) and accepts prefix patterns `p*`.
+   */
+  namespaces?: string[] | null;
+  /** Expiry in days from now. */
+  expires_in_days?: number;
+}
+
+/**
+ * Body of `PATCH /admin/keys/{id}` and `PATCH /v1/namespaces/{ns}/keys/{id}`
+ * (server v0.12.2+). At least one field; the scope cannot be changed.
+ */
+export interface UpdateKeyRequest {
+  /** New name. */
+  name?: string;
+  /**
+   * Replace the grants: an array replaces the list, `null` means every
+   * namespace (unrestricted callers only), and leaving it `undefined` keeps the
+   * list unchanged (the field is not sent). Saving `namespaces` moves the key
+   * to `grants_version: 1`, which activates its `p*` patterns.
+   */
+  namespaces?: string[] | null;
+}
+
+/** Options for {@link DakeraClient.rotateKey}. */
+export interface RotateKeyOptions {
+  /**
+   * Server v0.12.2+: seconds (0..=604800) the OLD key keeps working after the
+   * rotation (until `min(its own expiry, now + grace_secs)`). `0` or undefined
+   * deactivates it at once (no body is sent, as before).
+   */
+  grace_secs?: number;
+}
+
+/** Response from `POST /admin/keys/{id}/rotate`. */
+export interface RotateKeyResponse {
+  /** The new secret — shown only once. */
+  new_key: string;
+  /** Id of the NEW key. */
+  key_id: string;
+  /** Server v0.12.2+: id of the rotated (old) key. */
+  old_key_id?: string;
+  /**
+   * Server v0.12.2+: when the old key stops working (Unix seconds); `null`
+   * without a grace period (it was deactivated at once).
+   */
+  old_key_expires_at?: number | null;
+  warning: string;
+}
+
+/** Response from `GET /v1/auth/whoami` (server v0.12.2+). */
+export interface WhoamiResponse {
+  key_id: string;
+  name: string;
+  scope: string;
+  /** Grants as the server reads them (`null` = every namespace). */
+  namespaces: string[] | null;
+  /** Whether the key reaches every namespace. */
+  unrestricted: boolean;
+  expires_at: number | null;
+  grants_version: number;
+  /** Entries that grant nothing (always present here, possibly `[]`). */
+  inert_namespaces: string[];
+  /** `false` when the server runs with authentication off (`key_id: "auth-disabled"`). */
+  auth_enabled: boolean;
 }
 
 /** API key usage statistics */
@@ -1888,6 +2304,11 @@ export interface BatchStoreMemoryResponse {
   stored_count: number;
   /** Time spent on ONNX embedding for the entire batch (milliseconds). */
   total_embedding_time_ms: number;
+  /**
+   * Server v0.12.2+: sessions the batch stored into that had already ended
+   * (the stores still succeeded). Omitted when none.
+   */
+  ended_sessions?: string[];
 }
 
 // ============================================================================
@@ -2184,6 +2605,28 @@ export interface NamespaceKeyInfo {
   created_at: number;
   active: boolean;
   expires_at?: number;
+  /** Scope as the server sends it. */
+  scope?: string;
+  /** The key's grants (`null` = every namespace). */
+  namespaces?: string[] | null;
+  /** Server v0.12.2+: grant syntax version (see {@link KeyInfo.grants_version}). */
+  grants_version?: number;
+  /** Server v0.12.2+: entries that grant nothing (omitted when empty). */
+  inert_namespaces?: string[];
+}
+
+/** Options for {@link DakeraClient.createNamespaceKey}. */
+export interface CreateNamespaceKeyOptions {
+  /** Scope of the new key, at most `admin`. */
+  scope?: string;
+  /**
+   * Namespaces beyond the path namespace. Server v0.12.2+ accepts prefix
+   * patterns here, validates them (400) and requires them to be contained in
+   * the caller's own grants (403).
+   */
+  extra_namespaces?: string[];
+  /** Expiry in days from now. */
+  expires_in_days?: number;
 }
 
 /**
@@ -2677,6 +3120,8 @@ export interface ShardInfo {
 export interface ShardListResponse {
   shards: ShardInfo[];
   total: number;
+  /** Server v0.12.2+: namespaces left out (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Request for POST /admin/cluster/shards/rebalance. */
@@ -2960,6 +3405,8 @@ export interface TtlStatsResponse {
   namespaces: TtlNamespaceStats[];
   total_with_ttl: number;
   total_expired: number;
+  /** Server v0.12.2+: namespaces left out (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Response from POST /v1/admin/ttl/cleanup */
@@ -3045,6 +3492,8 @@ export interface StorageTierOverview {
   architecture: TierInfo[];
   config: TierConfig;
   activity: TierActivity;
+  /** Server v0.12.2+: namespaces left out (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Response from GET /admin/memory-type-stats */
@@ -3055,6 +3504,8 @@ export interface MemoryTypeStatsResponse {
   semantic: number;
   procedural: number;
   agent_namespaces: number;
+  /** Server v0.12.2+: namespaces left out (absent when every namespace answered). */
+  unavailable?: UnavailableNamespace[];
 }
 
 /** Request body for POST /admin/namespaces/migrate-dimensions */
@@ -3348,4 +3799,138 @@ export interface RecordView {
   metadata?: Record<string, unknown>;
   ttl_seconds?: number;
   expires_at?: number;
+}
+
+// =============================================================================
+// Server v0.12.2: runtime config, derived-data reconciliation
+// =============================================================================
+
+/**
+ * The runtime configuration document (`GET` / `PUT /admin/config`). Typed for
+ * the fields the SDK documents; every other field the server sends is kept.
+ */
+export interface AdminConfig {
+  /**
+   * Server v0.12.2+: seconds of inactivity after which the server ends an open
+   * session that did not set its own timeout (`0` = never; at most 2592000).
+   * `DAKERA_SESSION_IDLE_TIMEOUT_SECS` at startup, 14400 (4 h) by default.
+   */
+  session_idle_timeout_secs?: number;
+  /** Live settings changed through `PUT /admin/config` (re-applied at startup). */
+  runtime_overrides?: string[];
+  [key: string]: unknown;
+}
+
+/** Derived data still owed (part of {@link DerivationStatus}). */
+export interface DerivationOwed {
+  /** Sentences marked parents call for with no child yet. */
+  pending_sentences: number;
+  /** Parents with at least one pending sentence. */
+  pending_parents: number;
+  /** Memories with text and no derivation marker. */
+  unmarked_parents: number;
+  /** Children whose sentence the parent's text no longer has. */
+  stale_children: number;
+  /** Children whose parent is not stored. */
+  orphan_children: number;
+  /** Kept children whose inherited fields are out of date. */
+  remeta_children: number;
+  /** Second children of one sentence. */
+  duplicate_children: number;
+  /** Children without a marker under a marked parent. */
+  legacy_children: number;
+  /** Memory records missing from the full-text index. */
+  bm25_missing: number;
+  /** Memories whose graph edges are owed and not queued. */
+  graph_owed: number;
+}
+
+/** The node's one-time derivation heal. */
+export interface DerivationHealState {
+  version: number;
+  complete: boolean;
+  /** The namespace being healed. */
+  namespace: string | null;
+  /** The last parent of `namespace` handled. */
+  cursor: string | null;
+  parents_healed: number;
+  graph_adopted: number;
+  started_at: number | null;
+  completed_at: number | null;
+}
+
+/** The derivation reconciler's state. */
+export interface DerivationReconcilerStatus {
+  /** `idle`, `waiting`, `standby`, `deferred`, `running` or `sleeping`. */
+  state: string;
+  /** Unix seconds of the last tick. */
+  last_tick_at: number | null;
+  ticks: number;
+  /** The namespace the round-robin visits next. */
+  next_namespace: string | null;
+}
+
+/** Derivation counters since the process started. */
+export interface DerivationCounters {
+  derived: number;
+  adopted: number;
+  rewritten: number;
+  deleted_stale: number;
+  deleted_orphans: number;
+  recheck_deleted: number;
+  retries: number;
+  deferred: number;
+  stamped: number;
+  superseded: number;
+  bm25_restored: number;
+  graph_rebuilds: number;
+  graph_adopted: number;
+}
+
+/** Response from `GET /admin/derivations/status` (server v0.12.2+). */
+export interface DerivationStatus extends DerivationOwed {
+  /** Nothing owed, nothing in flight, the graph edge queue empty. */
+  settled: boolean;
+  /** Derivation runs in flight. */
+  in_flight: number;
+  /** Memories whose edges the edge queue holds. */
+  graph_queue_owed: number;
+  /** Namespaces marked for the reconciler. */
+  dirty_namespaces: string[];
+  /** Agent namespaces counted. */
+  namespaces: number;
+  /** Namespaces whose index could not be built (not counted). */
+  unreadable_namespaces: string[];
+  /** This node's heal; `null` until loaded. */
+  heal: DerivationHealState | null;
+  reconciler: DerivationReconcilerStatus;
+  counters: DerivationCounters;
+}
+
+/** Body of `POST /admin/derivations/drain` (server v0.12.2+). */
+export interface DrainDerivationsRequest {
+  /** Default 600, capped by the server at 4/5 of its request timeout. Not sent when undefined. */
+  timeout_secs?: number;
+}
+
+/** Response from `POST /admin/derivations/drain` (server v0.12.2+). */
+export interface DrainDerivationsResponse {
+  /** Whether nothing is owed any more. */
+  settled: boolean;
+  /** `true` only when it stopped on the timeout unsettled. */
+  timed_out: boolean;
+  rounds: number;
+  elapsed_ms: number;
+  /** Parents run by the drain. */
+  parents_run: number;
+  /** Sentences the last round could not derive. */
+  pending_left: number;
+  /** Stale, orphaned and duplicate children deleted. */
+  deleted: number;
+  /** Full-text documents restored. */
+  bm25_restored: number;
+  /** Memories queued for a graph-edge rebuild. */
+  graph_queued: number;
+  /** The status after the drain. */
+  status: DerivationStatus;
 }

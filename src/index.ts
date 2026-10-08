@@ -42,6 +42,8 @@ export {
   isKnownRoutingMode,
   KNOWN_FUSION_STRATEGIES,
   isKnownFusionStrategy,
+  KNOWN_NAMESPACE_KINDS,
+  isKnownNamespaceKind,
 } from './types';
 export type {
   KnownDistanceMetric,
@@ -56,6 +58,8 @@ export type {
   KnownBlockDType,
   KnownRoutingMode,
   KnownFusionStrategy,
+  NamespaceKind,
+  KnownNamespaceKind,
 } from './types';
 
 // R9: GET /v1/capabilities
@@ -77,6 +81,9 @@ export type {
   AttachmentCapabilities,
   TranscriptionCapabilities,
   VisionCapabilities,
+  AuthCapabilities,
+  NamingCapabilities,
+  SessionCapabilities,
 } from './capabilities';
 
 // Session helpers
@@ -408,6 +415,35 @@ export type {
   RecordView,
   RepresentationInput,
   RepresentationInfo,
+  // Server v0.12.2
+  UnavailableNamespace,
+  StartSessionOptions,
+  EndSessionOptions,
+  SessionEndedReason,
+  KnownSessionEndedReason,
+  SessionState,
+  KnownSessionState,
+  SessionTouchResponse,
+  SessionMemoriesOptions,
+  AgentMemoriesOptions,
+  CreateAgentRequest,
+  CreateAgentResponse,
+  CompressSkippedSummary,
+  FullKnowledgeGraphStats,
+  KeyInfo,
+  UpdateKeyRequest,
+  RotateKeyOptions,
+  RotateKeyResponse,
+  WhoamiResponse,
+  CreateNamespaceKeyOptions,
+  AdminConfig,
+  DerivationOwed,
+  DerivationHealState,
+  DerivationReconcilerStatus,
+  DerivationCounters,
+  DerivationStatus,
+  DrainDerivationsRequest,
+  DrainDerivationsResponse,
 } from './types';
 
 // Errors

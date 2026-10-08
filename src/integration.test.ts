@@ -368,3 +368,77 @@ describeIntegration("Authentication", () => {
     expect(Array.isArray(namespaces)).toBe(true);
   });
 });
+
+describeIntegration("Sessions / memory listings (every 0.12.x server)", () => {
+  it("lists sessions and session memories through the server's wrapped answers", async () => {
+    const agentId = `integ-list-${crypto.randomUUID().slice(0, 8)}`;
+    const session = await client.startSession(agentId);
+    await client.storeMemory(agentId, { content: "A note stored in a listed session.", session_id: session.id });
+    const sessions = await client.listSessions({ agent_id: agentId });
+    expect(sessions.map((s) => s.id)).toContain(session.id);
+    const memories = await client.sessionMemories(session.id);
+    expect(memories.length).toBeGreaterThan(0);
+    await client.endSession(session.id);
+  });
+});
+
+// Server v0.12.2 additions. Each test returns early against an older server
+// (capabilities_version < 2), so the suite stays green on 0.12.0 / 0.12.1.
+describeIntegration("Server v0.12.2 (agents, whoami, session lifecycle, previews)", () => {
+  let v0122 = false;
+
+  beforeAll(async () => {
+    const caps = await client.capabilities({ refresh: true });
+    v0122 = caps.capabilities_version >= 2 && caps.sessions !== undefined;
+  });
+
+  it("whoami describes the root key", async () => {
+    if (!v0122) return;
+    const me = await client.whoami();
+    expect(me.auth_enabled).toBe(true);
+    expect(me.unrestricted).toBe(true);
+    expect(me.grants_version).toBe(1);
+  });
+
+  it("createAgent creates once, then answers created: false", async () => {
+    if (!v0122) return;
+    const agentId = `integ-new-${crypto.randomUUID().slice(0, 8)}`;
+    const first = await client.createAgent(agentId);
+    expect(first.created).toBe(true);
+    expect(first.namespace).toBe(`_dakera_agent_${agentId}`);
+    const second = await client.createAgent(agentId);
+    expect(second.created).toBe(false);
+  });
+
+  it("start with idle_timeout_secs, touch, end, touch again", async () => {
+    if (!v0122) return;
+    const agentId = `integ-idle-${crypto.randomUUID().slice(0, 8)}`;
+    const session = await client.startSession(agentId, undefined, { idle_timeout_secs: 3600 });
+    expect(session.idle_timeout_secs).toBe(3600);
+    expect(session.last_activity_at).toBe(session.started_at);
+
+    const touched = await client.touchSession(session.id);
+    expect(touched.session_state).toBe("active");
+    expect(typeof touched.idle_deadline_at).toBe("number");
+
+    const stored = await client.storeMemory(agentId, { content: "Stored with the session.", session_id: session.id });
+    expect(stored.session_state).toBe("active");
+
+    const ended = await client.endSession(session.id);
+    expect(ended.session.ended_reason).toBe("client");
+
+    const after = await client.touchSession(session.id);
+    expect(after.session_state).toBe("ended");
+  });
+
+  it("agentMemories honours content_preview_chars", async () => {
+    if (!v0122) return;
+    const agentId = `integ-preview-${crypto.randomUUID().slice(0, 8)}`;
+    await client.storeMemory(agentId, { content: "Preview this fairly long memory content, please." });
+    const memories = await client.agentMemories(agentId, { content_preview_chars: 7 });
+    expect(memories.length).toBeGreaterThan(0);
+    expect(memories[0].content_truncated).toBe(true);
+    expect(memories[0].content.length).toBe(7);
+    expect(memories[0].content_len).toBeGreaterThan(7);
+  });
+});

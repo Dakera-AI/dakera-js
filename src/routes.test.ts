@@ -212,8 +212,22 @@ const V012_ROUTES = [
   'PUT /v1/namespaces/{namespace}/memory_policy',
 ];
 
+/**
+ * Routes server v0.12.2 adds (`crates/api/src/lib.rs`, `keys_router`). The SDK
+ * methods calling them answer 404/405 on a v0.12.0/v0.12.1 server.
+ */
+const V0122_ROUTES = [
+  'GET /admin/derivations/status',
+  'GET /v1/auth/whoami',
+  'PATCH /admin/keys/{key_id}',
+  'PATCH /v1/namespaces/{namespace}/keys/{key_id}',
+  'POST /admin/derivations/drain',
+  'POST /v1/agents',
+  'POST /v1/sessions/{id}/touch',
+];
+
 const known = new Set(
-  V012_ROUTES.map((r) => {
+  [...V012_ROUTES, ...V0122_ROUTES].map((r) => {
     const [method, path] = r.split(' ');
     return `${method} ${path.replace(/\{[^}]*\}/g, '{}')}`;
   })
@@ -242,7 +256,7 @@ function sdkCalls(): Array<{ method: string; path: string }> {
   return out;
 }
 
-describe('SDK endpoints exist in the v0.12.0 router', () => {
+describe('SDK endpoints exist in the v0.12.0 / v0.12.2 router', () => {
   const calls = sdkCalls();
 
   it('finds the SDK request calls', () => {
