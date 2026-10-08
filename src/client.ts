@@ -51,6 +51,23 @@ function flattenRecalledMemory(item: any): any {
 }
 
 import type {
+  AdminConfig,
+  AgentMemoriesOptions,
+  CreateAgentResponse,
+  CreateNamespaceKeyOptions,
+  DerivationStatus,
+  DrainDerivationsRequest,
+  DrainDerivationsResponse,
+  EndSessionOptions,
+  KeyInfo,
+  NamespaceKind,
+  RotateKeyOptions,
+  RotateKeyResponse,
+  SessionMemoriesOptions,
+  SessionTouchResponse,
+  StartSessionOptions,
+  UpdateKeyRequest,
+  WhoamiResponse,
   AgentStats,
   AgentSummary,
   AnalyticsOptions,
@@ -294,7 +311,7 @@ const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
 /** SDK version, kept in sync with package.json. Used for the default User-Agent. */
-const SDK_VERSION = '0.12.1';
+const SDK_VERSION = '0.12.2';
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -965,11 +982,17 @@ export class DakeraClient {
    * @returns Array of namespace info
    */
   async listNamespaces(): Promise<NamespaceInfo[]> {
-    const response = await this.request<{ namespaces: string[] }>(
-      'GET',
-      '/v1/namespaces'
-    );
-    return response.namespaces.map((ns) => ({ namespace: ns, vector_count: 0 }));
+    const response = await this.request<{
+      namespaces: string[];
+      kinds?: Record<string, NamespaceKind>;
+    }>('GET', '/v1/namespaces');
+    const kinds = response.kinds ?? {};
+    return response.namespaces.map((ns) => {
+      const kind = kinds[ns];
+      return kind !== undefined
+        ? { namespace: ns, vector_count: 0, kind }
+        : { namespace: ns, vector_count: 0 };
+    });
   }
 
   /**
@@ -2364,15 +2387,66 @@ export class DakeraClient {
   // Session Operations
   // ===========================================================================
 
-  /** Start a new session */
-  async startSession(agentId: string, metadata?: Record<string, unknown>): Promise<Session> {
-    const resp = await this.request<SessionStartResponse>('POST', '/v1/sessions/start', { agent_id: agentId, metadata });
+  /**
+   * Start a new session (`POST /v1/sessions/start`).
+   *
+   * Server v0.12.2+: sessions are authorized by their agent (Write on
+   * `_dakera_agent_<agentId>`; no `_dakera_sessions` grant is needed), and an
+   * open session is ended by the server after `idle_timeout_secs` without
+   * activity (server default 4 h; `capabilities().sessions`). Keep an idle
+   * session open with {@link touchSession}, or pass `idle_timeout_secs: 0`.
+   *
+   * @param agentId - Agent the session belongs to.
+   * @param metadata - Optional session metadata.
+   * @param options - Optional `id` and `idle_timeout_secs` (not sent when undefined).
+   */
+  async startSession(
+    agentId: string,
+    metadata?: Record<string, unknown>,
+    options?: StartSessionOptions,
+  ): Promise<Session> {
+    const body: Record<string, unknown> = { agent_id: agentId };
+    if (metadata !== undefined) body.metadata = metadata;
+    if (options?.id !== undefined) body.id = options.id;
+    if (options?.idle_timeout_secs !== undefined) body.idle_timeout_secs = options.idle_timeout_secs;
+    const resp = await this.request<SessionStartResponse>('POST', '/v1/sessions/start', body);
     return resp.session;
   }
 
-  /** End a session. Returns the session state and total memory count at close. */
-  async endSession(sessionId: string): Promise<SessionEndResponse> {
-    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`, {});
+  /**
+   * End a session. Returns the session state and total memory count at close.
+   *
+   * Server v0.12.2+: needs Write scope (a Read key gets 403 for any id). A
+   * session that already ended (by a client or after its idle timeout) answers
+   * with its persisted state — `ended_reason` and `summary` are not
+   * overwritten. An unknown session, or one of an agent the key cannot reach,
+   * gets the same idempotent 200 with an empty session (`agent_id: ""`).
+   *
+   * @param sessionId - Session to end.
+   * @param options - Optional `summary` / `auto_summarize` (not sent when undefined).
+   */
+  async endSession(sessionId: string, options?: EndSessionOptions): Promise<SessionEndResponse> {
+    const body: Record<string, unknown> = {};
+    if (options?.summary !== undefined) body.summary = options.summary;
+    if (options?.auto_summarize !== undefined) body.auto_summarize = options.auto_summarize;
+    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`, body);
+  }
+
+  /**
+   * Record activity on a session without storing anything
+   * (`POST /v1/sessions/{id}/touch`, server v0.12.2+).
+   *
+   * A heartbeat for a client that keeps a session open while idle, so the
+   * server's idle timeout does not end it. Never re-opens an ended session:
+   * check `session_state` (`"active"` | `"ended"`). Needs Write scope on the
+   * session's agent; a session of another agent answers 404, like an unknown
+   * one. A pre-0.12.2 server answers 404 (no such route).
+   */
+  async touchSession(sessionId: string): Promise<SessionTouchResponse> {
+    return this.request<SessionTouchResponse>(
+      'POST',
+      `/v1/sessions/${encodeURIComponent(sessionId)}/touch`,
+    );
   }
 
   /** Get session details */
@@ -2388,12 +2462,36 @@ export class DakeraClient {
     if (options?.limit !== undefined) params.set('limit', String(options.limit));
     if (options?.offset !== undefined) params.set('offset', String(options.offset));
     const qs = params.toString();
-    return this.request<Session[]>('GET', `/v1/sessions${qs ? `?${qs}` : ''}`);
+    const raw = await this.request<Session[] | { sessions?: Session[] }>(
+      'GET',
+      `/v1/sessions${qs ? `?${qs}` : ''}`,
+    );
+    // The server answers `{sessions, total}`; a bare array is accepted too.
+    return Array.isArray(raw) ? raw : (raw?.sessions ?? []);
   }
 
-  /** Get memories for a session */
-  async sessionMemories(sessionId: string): Promise<RecalledMemory[]> {
-    return this.request<RecalledMemory[]>('GET', `/v1/sessions/${sessionId}/memories`);
+  /**
+   * Get memories for a session (`GET /v1/sessions/{id}/memories`).
+   *
+   * @param sessionId - Session whose memories to list.
+   * @param options - Optional `limit`, `offset` and (server v0.12.2+)
+   *   `content_preview_chars`, which cuts each `content` and adds
+   *   `content_len` / `content_truncated`. Not sent when undefined.
+   */
+  async sessionMemories(sessionId: string, options?: SessionMemoriesOptions): Promise<RecalledMemory[]> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set('limit', String(options.limit));
+    if (options?.offset !== undefined) params.set('offset', String(options.offset));
+    if (options?.content_preview_chars !== undefined) {
+      params.set('content_preview_chars', String(options.content_preview_chars));
+    }
+    const qs = params.toString();
+    const raw = await this.request<RecalledMemory[] | { memories?: RecalledMemory[] }>(
+      'GET',
+      `/v1/sessions/${sessionId}/memories${qs ? `?${qs}` : ''}`,
+    );
+    // The server answers `{session, memories, total}`; a bare array is accepted too.
+    return Array.isArray(raw) ? raw : (raw?.memories ?? []);
   }
 
   // ===========================================================================
@@ -2405,11 +2503,37 @@ export class DakeraClient {
     return this.request<AgentSummary[]>('GET', '/v1/agents');
   }
 
-  /** Get memories for an agent */
-  async agentMemories(agentId: string, options?: { memory_type?: string; limit?: number }): Promise<RecalledMemory[]> {
+  /**
+   * Create an agent — its memory namespace — before its first memory
+   * (`POST /v1/agents`, server v0.12.2+).
+   *
+   * Needs Write on `_dakera_agent_<agentId>` (a key granted
+   * `_dakera_agent_mlx-*` can create `mlx-dev`). Idempotent: an existing agent
+   * is left untouched and answers `created: false`. An invalid id (pattern
+   * `^[a-zA-Z0-9][a-zA-Z0-9_\-.]*$`, at most 241 bytes, not `_dakera_…`) gets
+   * a ValidationError. A pre-0.12.2 server answers 404/405.
+   */
+  async createAgent(agentId: string): Promise<CreateAgentResponse> {
+    return this.request<CreateAgentResponse>('POST', '/v1/agents', { agent_id: agentId });
+  }
+
+  /**
+   * Get memories for an agent (`GET /v1/agents/{id}/memories`).
+   *
+   * Server v0.12.2+ leaves derived records (CE-31 sentence sub-memories) out of
+   * this listing unless `include_derived: true`, and `content_preview_chars`
+   * cuts each `content` (adding `content_len` / `content_truncated`). Options
+   * left undefined are not sent.
+   */
+  async agentMemories(agentId: string, options?: AgentMemoriesOptions): Promise<RecalledMemory[]> {
     const params = new URLSearchParams();
     if (options?.memory_type) params.set('memory_type', options.memory_type);
     if (options?.limit !== undefined) params.set('limit', String(options.limit));
+    if (options?.offset !== undefined) params.set('offset', String(options.offset));
+    if (options?.include_derived !== undefined) params.set('include_derived', String(options.include_derived));
+    if (options?.content_preview_chars !== undefined) {
+      params.set('content_preview_chars', String(options.content_preview_chars));
+    }
     const qs = params.toString();
     return this.request<RecalledMemory[]>('GET', `/v1/agents/${agentId}/memories${qs ? `?${qs}` : ''}`);
   }
@@ -2438,12 +2562,15 @@ export class DakeraClient {
    * Requires Read scope on the agent namespace.
    *
    * @param agentId - Agent identifier.
-   * @param options - Optional `top_n` (default 20, max 100) and `min_importance` (default 0.0).
+   * @param options - Optional `top_n` (default 20, max 100), `min_importance` (default 0.0)
+   *   and (server v0.12.2+) `include_derived` — wake-up leaves derived sentence
+   *   sub-memories out by default, and `total_available` counts memories only.
    */
   async getWakeUpContext(agentId: string, options?: WakeUpOptions): Promise<WakeUpResponse> {
     const params = new URLSearchParams();
     if (options?.top_n !== undefined) params.set('top_n', String(options.top_n));
     if (options?.min_importance !== undefined) params.set('min_importance', String(options.min_importance));
+    if (options?.include_derived !== undefined) params.set('include_derived', String(options.include_derived));
     const qs = params.toString();
     return this.request<WakeUpResponse>('GET', `/v1/agents/${agentId}/wake-up${qs ? `?${qs}` : ''}`);
   }
@@ -2686,13 +2813,19 @@ export class DakeraClient {
   }
 
   /** Get server configuration */
-  async getConfig(): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', '/v1/admin/config');
+  async getConfig(): Promise<AdminConfig> {
+    return this.request<AdminConfig>('GET', '/v1/admin/config');
   }
 
-  /** Update server configuration */
-  async updateConfig(config: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('PUT', '/v1/admin/config', config);
+  /**
+   * Update server configuration (`PUT /admin/config`).
+   *
+   * Server v0.12.2+ accepts `session_idle_timeout_secs` (0..=2592000; 400
+   * above, nothing applied): the server-wide idle timeout after which open
+   * sessions without their own timeout are ended.
+   */
+  async updateConfig(config: AdminConfig | Record<string, unknown>): Promise<AdminConfig> {
+    return this.request<AdminConfig>('PUT', '/v1/admin/config', config);
   }
 
   /** Get quota settings */
@@ -2826,7 +2959,9 @@ export class DakeraClient {
 
   /** List all API keys */
   async listKeys(): Promise<ApiKey[]> {
-    return this.request<ApiKey[]>('GET', '/admin/keys');
+    const raw = await this.request<ApiKey[] | { keys?: ApiKey[] }>('GET', '/admin/keys');
+    // The server answers `{keys, total}`; a bare array is accepted too.
+    return Array.isArray(raw) ? raw : (raw?.keys ?? []);
   }
 
   /** Get an API key by ID */
@@ -2844,9 +2979,44 @@ export class DakeraClient {
     return this.request<ApiKey>('POST', `/admin/keys/${keyId}/deactivate`);
   }
 
-  /** Rotate an API key */
-  async rotateKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', `/admin/keys/${keyId}/rotate`);
+  /**
+   * Rename an API key or replace its namespace grants
+   * (`PATCH /admin/keys/{id}`, server v0.12.2+; unrestricted super_admin).
+   *
+   * Only the fields given are sent: `namespaces: null` is sent as `null`
+   * (every namespace), an undefined field is left out (unchanged). The scope
+   * cannot be changed. The root key → 400, an inactive key → 409
+   * (ConflictError), an unknown key → 404.
+   */
+  async updateKey(keyId: string, request: UpdateKeyRequest): Promise<KeyInfo> {
+    return this.request<KeyInfo>(
+      'PATCH',
+      `/admin/keys/${encodeURIComponent(keyId)}`,
+      updateKeyBody(request),
+    );
+  }
+
+  /**
+   * Rotate an API key (`POST /admin/keys/{id}/rotate`).
+   *
+   * With `grace_secs` (server v0.12.2+, 0..=604800) the old key keeps working
+   * until `old_key_expires_at`; without it no body is sent and the old key is
+   * deactivated at once, as before. `key_id` in the answer is the NEW key's id.
+   */
+  async rotateKey(keyId: string, options?: RotateKeyOptions): Promise<RotateKeyResponse> {
+    const body =
+      options?.grace_secs !== undefined ? { grace_secs: options.grace_secs } : undefined;
+    return this.request<RotateKeyResponse>('POST', `/admin/keys/${keyId}/rotate`, body);
+  }
+
+  /**
+   * The key this client authenticates with, as the server reads it
+   * (`GET /v1/auth/whoami`, server v0.12.2+). Any valid key; no scope needed.
+   * With authentication off: `auth_enabled: false`. A pre-0.12.2 server
+   * answers 404.
+   */
+  async whoami(): Promise<WhoamiResponse> {
+    return this.request<WhoamiResponse>('GET', '/v1/auth/whoami');
   }
 
   /** Get usage statistics for an API key */
@@ -3139,15 +3309,25 @@ export class DakeraClient {
    *
    * @param namespace     The namespace to scope this key to.
    * @param name          Human-readable label for the key.
-   * @param expiresInDays Optional expiry in days from now.
+   * @param expiresInDaysOrOptions Expiry in days from now, or options:
+   *   `scope` (at most `admin`), `extra_namespaces` (server v0.12.2+: may hold
+   *   prefix patterns, validated and contained in the caller's grants) and
+   *   `expires_in_days`. Undefined fields are not sent.
    */
   async createNamespaceKey(
     namespace: string,
     name: string,
-    expiresInDays?: number,
+    expiresInDaysOrOptions?: number | CreateNamespaceKeyOptions,
   ): Promise<CreateNamespaceKeyResponse> {
     const body: Record<string, unknown> = { name };
-    if (expiresInDays !== undefined) body.expires_in_days = expiresInDays;
+    if (typeof expiresInDaysOrOptions === 'number') {
+      body.expires_in_days = expiresInDaysOrOptions;
+    } else if (expiresInDaysOrOptions !== undefined) {
+      const o = expiresInDaysOrOptions;
+      if (o.scope !== undefined) body.scope = o.scope;
+      if (o.extra_namespaces !== undefined) body.extra_namespaces = o.extra_namespaces;
+      if (o.expires_in_days !== undefined) body.expires_in_days = o.expires_in_days;
+    }
     return this.request<CreateNamespaceKeyResponse>('POST', `/v1/namespaces/${namespace}/keys`, body);
   }
 
@@ -3158,6 +3338,31 @@ export class DakeraClient {
    */
   async listNamespaceKeys(namespace: string): Promise<ListNamespaceKeysResponse> {
     return this.request<ListNamespaceKeysResponse>('GET', `/v1/namespaces/${namespace}/keys`);
+  }
+
+  /**
+   * Rename a key or replace its grants as a namespace admin
+   * (`PATCH /v1/namespaces/{ns}/keys/{id}`, server v0.12.2+).
+   *
+   * Same body and answer as {@link updateKey}. The key must reach `namespace`
+   * and be one the caller can manage (otherwise 404); every new grant must be
+   * contained in the caller's grants (403 naming it); `namespaces: null` only
+   * from an unrestricted caller.
+   *
+   * @param namespace  A namespace the caller administers and the key reaches.
+   * @param keyId      The key to edit.
+   * @param request    `name` and/or `namespaces`.
+   */
+  async updateNamespaceKey(
+    namespace: string,
+    keyId: string,
+    request: UpdateKeyRequest,
+  ): Promise<KeyInfo> {
+    return this.request<KeyInfo>(
+      'PATCH',
+      `/v1/namespaces/${encodeURIComponent(namespace)}/keys/${encodeURIComponent(keyId)}`,
+      updateKeyBody(request),
+    );
   }
 
   /**
@@ -3775,4 +3980,37 @@ export class DakeraClient {
   async adminReembedStaticCount(): Promise<StaticCountResponse> {
     return this.request<StaticCountResponse>('GET', '/v1/admin/reembed/static-count');
   }
+
+  /**
+   * GET /admin/derivations/status — derived data still owed across every agent
+   * namespace (server v0.12.2+; global Admin scope). `settled` is true when
+   * nothing is owed, nothing is in flight and the graph edge queue is empty.
+   */
+  async adminDerivationStatus(): Promise<DerivationStatus> {
+    return this.request<DerivationStatus>('GET', '/v1/admin/derivations/status');
+  }
+
+  /**
+   * POST /admin/derivations/drain — run the derivation heal and every agent
+   * namespace's reconciliation now, on this node, until nothing is owed or the
+   * timeout (server v0.12.2+; global Admin scope). A drain already running
+   * answers 409 (ConflictError). Can run for minutes: give the client a
+   * `timeout` above `timeout_secs`. `timeout_secs` is not sent when undefined.
+   */
+  async adminDrainDerivations(request?: DrainDerivationsRequest): Promise<DrainDerivationsResponse> {
+    const body: Record<string, unknown> = {};
+    if (request?.timeout_secs !== undefined) body.timeout_secs = request.timeout_secs;
+    return this.request<DrainDerivationsResponse>('POST', '/v1/admin/derivations/drain', body);
+  }
+}
+
+/**
+ * Body of the key PATCH routes: only the fields given; `namespaces: null` is
+ * kept (it means every namespace), an undefined field is left out.
+ */
+function updateKeyBody(request: UpdateKeyRequest): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (request.name !== undefined) body.name = request.name;
+  if (request.namespaces !== undefined) body.namespaces = request.namespaces;
+  return body;
 }

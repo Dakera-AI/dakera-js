@@ -96,6 +96,50 @@ export interface VisionCapabilities {
   raw: Record<string, unknown>;
 }
 
+/** Key and grant surface (`capabilities.auth`, server v0.12.2+). */
+export interface AuthCapabilities {
+  /** Key grants accept prefix patterns `p*`. */
+  prefix_patterns: boolean;
+  /** Sessions are authorized by their agent's namespace alone. */
+  sessions_by_agent: boolean;
+  /** `PATCH /admin/keys/{id}` and `PATCH /v1/namespaces/{ns}/keys/{id}` exist. */
+  key_update: boolean;
+  /** Largest `grace_secs` a rotation accepts. */
+  rotation_grace_max_secs: number;
+  /** Most entries in a key's `namespaces`. */
+  max_grants: number;
+  /** Longest grant entry in bytes. */
+  max_grant_len: number;
+  raw: Record<string, unknown>;
+}
+
+/** Naming rules (`capabilities.naming`, server v0.12.2+). */
+export interface NamingCapabilities {
+  agent_id_pattern: string;
+  agent_id_max_bytes: number;
+  agent_namespace_prefix: string;
+  agent_namespace_max_bytes: number;
+  namespace_pattern: string;
+  namespace_max_bytes: number;
+  reserved_prefixes: string[];
+  internal_namespaces: string[];
+  internal_prefixes: string[];
+  raw: Record<string, unknown>;
+}
+
+/** Session lifecycle (`capabilities.sessions`, server v0.12.2+). */
+export interface SessionCapabilities {
+  /** The live server-wide idle timeout in seconds (`0` = sessions without their own are never ended). */
+  idle_timeout_secs: number;
+  /** Largest `idle_timeout_secs` a session may set. */
+  max_idle_timeout_secs: number;
+  /** `POST /v1/sessions/{id}/touch` exists. */
+  touch: boolean;
+  /** Sessions carry `ended_reason`. */
+  ended_reason: boolean;
+  raw: Record<string, unknown>;
+}
+
 /** The capabilities document. */
 export interface ServerCapabilities {
   capabilities_version: number;
@@ -125,6 +169,12 @@ export interface ServerCapabilities {
   query_languages: string[];
   /** A model change was acknowledged but the store is not fully re-embedded yet. */
   reembed_pending: boolean;
+  /** v0.12.2 (`capabilities_version` 2): key grants and rotation. Undefined on older servers. */
+  auth?: AuthCapabilities;
+  /** v0.12.2 (`capabilities_version` 2): naming rules. Undefined on older servers. */
+  naming?: NamingCapabilities;
+  /** v0.12.2 (`capabilities_version` 2): session idle timeout and touch. Undefined on older servers. */
+  sessions?: SessionCapabilities;
   /** The verbatim document. */
   raw: Record<string, unknown>;
 }
@@ -151,6 +201,11 @@ function integer(value: unknown, fallback = 0): number {
 
 function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+/** `{ [key]: value }` when `value` is defined, `{}` otherwise (no `key: undefined`). */
+function optional<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
+  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
 /**
@@ -254,6 +309,46 @@ function parseVision(raw: unknown): VisionCapabilities {
   };
 }
 
+function parseAuth(raw: unknown): AuthCapabilities | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    prefix_patterns: raw.prefix_patterns === true,
+    sessions_by_agent: raw.sessions_by_agent === true,
+    key_update: raw.key_update === true,
+    rotation_grace_max_secs: integer(raw.rotation_grace_max_secs),
+    max_grants: integer(raw.max_grants),
+    max_grant_len: integer(raw.max_grant_len),
+    raw,
+  };
+}
+
+function parseNaming(raw: unknown): NamingCapabilities | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    agent_id_pattern: text(raw.agent_id_pattern),
+    agent_id_max_bytes: integer(raw.agent_id_max_bytes),
+    agent_namespace_prefix: text(raw.agent_namespace_prefix, '_dakera_agent_'),
+    agent_namespace_max_bytes: integer(raw.agent_namespace_max_bytes),
+    namespace_pattern: text(raw.namespace_pattern),
+    namespace_max_bytes: integer(raw.namespace_max_bytes),
+    reserved_prefixes: stringList(raw.reserved_prefixes),
+    internal_namespaces: stringList(raw.internal_namespaces),
+    internal_prefixes: stringList(raw.internal_prefixes),
+    raw,
+  };
+}
+
+function parseSessions(raw: unknown): SessionCapabilities | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    idle_timeout_secs: integer(raw.idle_timeout_secs),
+    max_idle_timeout_secs: integer(raw.max_idle_timeout_secs),
+    touch: raw.touch === true,
+    ended_reason: raw.ended_reason === true,
+    raw,
+  };
+}
+
 /**
  * Runtime guard for a capabilities document: tolerates unknown fields, unknown
  * strings inside lists, missing fields and non-object input (→ empty document).
@@ -281,6 +376,9 @@ export function parseCapabilities(raw: unknown): ServerCapabilities {
     unreadable_records: integer(doc.unreadable_records),
     query_languages: stringList(doc.query_languages),
     reembed_pending: doc.reembed_pending === true,
+    ...optional('auth', parseAuth(doc.auth)),
+    ...optional('naming', parseNaming(doc.naming)),
+    ...optional('sessions', parseSessions(doc.sessions)),
     raw: doc,
   };
 }

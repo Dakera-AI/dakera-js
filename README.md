@@ -125,6 +125,61 @@ for await (const event of stream) {
 
 ---
 
+## What's new for Dakera server v0.12.2
+
+This SDK release (0.12.2) targets Dakera server **v0.12.2** and stays **compatible with v0.12.0 and
+v0.12.1 servers**: every new request field is optional and left out when unset, every new response field
+is optional, and the new routes answer 404/405 on an older server. Operator upgrade path: "Upgrading from
+v0.12.1 to v0.12.2" in the server's `docs/v0.12/UPGRADE.md`.
+
+- **Agents** — `createAgent(agentId)` (`POST /v1/agents`) creates an agent's memory namespace before its
+  first memory; idempotent (`created: false` for an existing agent).
+- **Keys** — `updateKey()` / `updateNamespaceKey()` (`PATCH`) rename a key or replace its grants
+  (`namespaces: null` = every namespace); `rotateKey(id, { grace_secs })` keeps the old key working for up
+  to 7 days (`old_key_id`, `old_key_expires_at`); `whoami()` (`GET /v1/auth/whoami`). Key grants may hold
+  prefix patterns (`team-*`); `KeyInfo` carries `grants_version` and `inert_namespaces`.
+- **Sessions** — `startSession(agentId, metadata, { idle_timeout_secs })`, `touchSession(id)`, and
+  `last_activity_at` / `ended_reason` / `idle_since` / `idle_timeout_secs` on sessions. Store answers say
+  `session_state`, batch stores list `ended_sessions`. `getConfig()` / `updateConfig()` carry
+  `session_idle_timeout_secs`.
+- **Listings** — `include_derived` on `agentMemories()` / `getWakeUpContext()`; `content_preview_chars`
+  (with `content_len` / `content_truncated` on each item) on `agentMemories()`, `sessionMemories()`,
+  `fullKnowledgeGraph()` and `crossAgentNetwork()`.
+- **Admin** — `adminDerivationStatus()` / `adminDrainDerivations()`; `unavailable` on node-wide answers;
+  `duplicates_skipped_changed` on `deduplicate()`, `summaries_skipped` on `compressAgent()`; namespace
+  `kind`; `capabilities()` v2 `auth`, `naming` and `sessions` blocks.
+
+### Behaviour changes you may hit with a v0.12.2 server
+
+- **Sessions are authorized by their agent.** A key needs access to `_dakera_agent_<agent_id>` (Write to
+  start, end and touch; Read to read and list) and no longer a `_dakera_sessions` grant, which is now inert.
+  A key without grants lists no sessions. `endSession()` with a Read key is a 403 for any id; ending a
+  session of an agent the key cannot reach returns the same empty 200 as an unknown session.
+- **Sessions end after 4 hours idle by default** (`ended_reason: "idle"`). Activity is a memory stored or
+  updated with the session, a session-scoped recall or search, or `touchSession()`. Keep a long-lived idle
+  session open with `touchSession()`, or start it with `idle_timeout_secs: 0`. Storing into an ended
+  session still succeeds; check `session_state` / `ended_sessions`.
+- **Stricter validation (400, the message names the field).** Key `namespaces` entries are checked
+  (junk entries, internal namespaces, mixed `"*"`); agent ids are at most 241 bytes; the `dakera-curated`
+  tag, `_dakera_*` metadata keys (except `_dakera_content_date` / `_dakera_lang`), ids shaped
+  `mem_s` + 24 hex and TTLs over 100 years are refused; `_dakera_embedding_models` is reserved.
+- **The memory content limit is in bytes** (UTF-8, `DAKERA_MAX_MEMORY_CONTENT_BYTES`, default 100000), now
+  also on `updateMemory()` and on the `endSession()` summary.
+- **Listings exclude derived records** (sentence sub-memories) unless `include_derived: true`
+  (`agentMemories()`, `getWakeUpContext()`; wake-up `total_available` counts memories only).
+- Keys created before v0.12.2 keep reading `foo*` entries as literal names (`grants_version: 0`, listed in
+  `inert_namespaces`) until their `namespaces` are saved with `updateKey()`.
+
+```ts
+const agent = await client.createAgent('mlx-dev');                    // 201 created / 200 existing
+const session = await client.startSession('mlx-dev', undefined, { idle_timeout_secs: 3600 });
+const { session_state } = await client.touchSession(session.id);     // 'active' | 'ended'
+const page = await client.agentMemories('mlx-dev', { content_preview_chars: 200 });
+const full = page[0]?.content_truncated ? await client.getMemory('mlx-dev', page[0].id) : page[0];
+```
+
+---
+
 ## What's new for Dakera server v0.12.0
 
 This SDK release (0.12.0) targets Dakera server **v0.12.0** and is **compatible with both v0.11.108
