@@ -435,14 +435,42 @@ export interface RetryConfig {
 export interface ClientOptions {
   /** Base URL of the Dakera server */
   baseUrl: string;
-  /** API key for authentication */
+  /**
+   * API key for authentication, sent as `Authorization: Bearer <key>` (never
+   * in a URL). The client keeps it in a private field: it does not appear in
+   * `JSON.stringify(client)`, `console.log(client)` or in any error the SDK
+   * throws.
+   *
+   * **Browsers:** a key given to code running in a browser is readable by
+   * anyone who can open the page (devtools, extensions, XSS). Keep keys on a
+   * server: call Dakera from your backend, or put a proxy in front that adds
+   * the key server-side (the Dakera dashboard does this), and construct the
+   * browser client without `apiKey`.
+   */
   apiKey?: string;
-  /** Per-request timeout in milliseconds (default: 30000) */
+  /**
+   * Timeout in milliseconds for one attempt of a request, from sending it to
+   * reading the whole response body (default: 30000). On expiry the request is
+   * aborted (AbortController) and a `TimeoutError` is thrown.
+   */
   timeout?: number;
-  /** Connection establishment timeout in milliseconds. Defaults to `timeout`. */
+  /**
+   * Bound in milliseconds for one attempt when shorter than `timeout`. `fetch`
+   * has no separate connect phase, so the shorter of the two bounds the whole
+   * attempt. Defaults to `timeout`.
+   */
   connectTimeout?: number;
-  /** Maximum number of retries for transient errors (default: 3).
-   *  Ignored when `retryBackoff` is provided. */
+  /**
+   * Maximum number of attempts per request (default: 3). Ignored when
+   * `retryBackoff` is provided.
+   *
+   * Only safe retries are made: a 429, and a 503 (both mean the server did not
+   * process the request), are retried for every method, honouring
+   * `Retry-After` (capped at 60 s); other 5xx answers, timeouts and network
+   * errors are retried only for idempotent requests (GET, HEAD, PUT, DELETE,
+   * and read-only POST routes such as recall, search and query). Other 4xx
+   * answers and 501 are never retried.
+   */
   maxRetries?: number;
   /** Fine-grained retry and backoff configuration.
    *  When provided, `maxRetries` is ignored in favour of `retryBackoff.maxRetries`. */
@@ -771,14 +799,209 @@ export interface RecalledMemory {
    * cut preview (read the whole memory with `getMemory()` when true).
    */
   content_truncated?: boolean;
+  /**
+   * Next server release: when derived sentence sub-memories are collapsed into
+   * their source (server flag `DAKERA_RECALL_COLLAPSE_DERIVED`, default off),
+   * the best-matching sentence, set when it outranked the source's own text.
+   * The result itself (`id`, `content`) is then the source memory. Absent on
+   * older servers and when nothing was collapsed.
+   */
+  matched_text?: string;
+  /**
+   * Next server release: ids of the sentence sub-memories collapsed into this
+   * result, best first. Absent when none matched (and on older servers).
+   */
+  matched_ids?: string[];
+  /**
+   * Next server release: how the item got into the response when it is not a
+   * ranked result — `"neighborhood"` for neighbourhood context returned inline
+   * (`neighborhood_mode: "inline"`, after the `top_k` ranked results). Its
+   * `score` is then the raw similarity of a different search and is NOT
+   * comparable with the ranked results' scores. Absent on ranked results.
+   */
+  retrieval?: RecallRetrieval;
+  /**
+   * Next server release: on a {@link RecallResponse.context_memories} entry,
+   * the id of the ranked memory it is context for.
+   */
+  context_of?: MemoryId;
+}
+
+/**
+ * Where a recall returns its neighbourhood context (session-adjacent memories
+ * of the top results), next server release (`neighborhood_mode`):
+ *
+ * - `inline`: appended to `memories` after the `top_k` ranked results, each
+ *   marked `retrieval: "neighborhood"` (the v0.11/v0.12 behaviour, and the
+ *   server default unless `DAKERA_NEIGHBORHOOD_MODE` says otherwise);
+ * - `separate`: `memories` holds at most `top_k` results and the context comes
+ *   back in `context_memories`, each entry with `context_of`;
+ * - `off`: no neighbourhood context.
+ *
+ * `neighborhood: false` still means `off` and wins over this field. Older
+ * servers ignore the field (they behave as `inline`).
+ */
+export type NeighborhoodMode = 'inline' | 'separate' | 'off';
+/** Every {@link NeighborhoodMode}. */
+export const NEIGHBORHOOD_MODES: readonly NeighborhoodMode[] = ['inline', 'separate', 'off'];
+/** Whether `value` is a {@link NeighborhoodMode}. */
+export function isNeighborhoodMode(value: unknown): value is NeighborhoodMode {
+  return (NEIGHBORHOOD_MODES as readonly unknown[]).includes(value);
+}
+
+/**
+ * `RecalledMemory.retrieval`: `"neighborhood"` today; kept open for newer
+ * server strings.
+ */
+export type RecallRetrieval = 'neighborhood' | (string & {});
+
+/** What the cross-encoder did for one recall or search (server v0.12+). */
+export interface RerankReport {
+  /** The cross-encoder rescored candidates and its order was used. */
+  applied: boolean;
+  /** How many candidates it scored. */
+  candidates: number;
+  /**
+   * Why it did not run (`disabled`, `bm25_routing`, `visual_lane`,
+   * `no_candidates`, `no_query`, `unavailable`, `failed`), or why its order was
+   * not used (`low_confidence`). Absent when it ran and was used.
+   */
+  skipped?: string;
+}
+
+/**
+ * Options of {@link DakeraClient.recall} (`POST /v1/memory/recall`). Every
+ * field is optional and left out of the request when `undefined`, so the
+ * server default applies.
+ */
+export interface MemoryRecallOptions {
+  /** v0.12: language of `query` (see {@link RecallRequest.lang}). */
+  lang?: string;
+  /**
+   * Number of ranked results (server default 10). The ranking of the first `k`
+   * results does not depend on `top_k` for `k <= 10` (next server release).
+   * Under `neighborhood_mode: "inline"` (the default) neighbourhood context is
+   * appended AFTER these `top_k` results, so `memories` can be longer; ask for
+   * `neighborhood_mode: "separate"` when `top_k` must be the maximum number of
+   * results.
+   */
+  top_k?: number;
+  /** Filter by memory type. */
+  memory_type?: string;
+  /** Recall within one session only. */
+  session_id?: string;
+  /** Only memories carrying these tags. */
+  tags?: string[];
+  /** Minimum importance threshold. */
+  min_importance?: number;
+  /** Importance-weighted re-ranking (server default `true`). */
+  importance_weighted?: boolean;
+  /** COG-2: include KG-linked memories in `associated_memories` (default false). */
+  include_associated?: boolean;
+  /** COG-2: max associated memories (default 10, max 10). */
+  associated_memories_cap?: number;
+  /** KG-3: traversal depth 1–3 (default 1); requires `include_associated`. */
+  associated_memories_depth?: number;
+  /** KG-3: minimum edge weight for KG traversal (default 0.0). */
+  associated_memories_min_weight?: number;
+  /** CE-7: only memories created at or after this ISO-8601 timestamp. */
+  since?: string;
+  /** CE-7: only memories created at or before this ISO-8601 timestamp. */
+  until?: string;
+  /** CE-10: retrieval routing mode (server default `auto`). */
+  routing?: RoutingMode;
+  /**
+   * CE-13: rescore the candidate pool with the cross-encoder (server default
+   * `true`). The pool is sized from the ranking depth (`max(top_k, 10)`): on
+   * hybrid routing 10x that depth (not `top_k * 3`).
+   */
+  rerank?: boolean;
+  /** Rerank at most this many candidates (server default: the whole pool). */
+  rerank_candidates?: number;
+  /** CE-14: fusion when routing is hybrid (server default `minmax`, not `rrf`). */
+  fusion?: FusionStrategy;
+  /** CE-17: explicit vector weight for hybrid routing (0.0–1.0). */
+  vector_weight?: number;
+  /** CE-23: pseudo-relevance feedback passes (1–3, default 1). */
+  iterations?: number;
+  /**
+   * v0.11: fetch session-adjacent memories of the top results as context
+   * (server default `true`). `false` means no neighbourhood whatever
+   * `neighborhood_mode` says.
+   */
+  neighborhood?: boolean;
+  /**
+   * Next server release: where the neighbourhood context goes — see
+   * {@link NeighborhoodMode}. Omitted: the server default
+   * (`DAKERA_NEIGHBORHOOD_MODE`, default `inline`).
+   */
+  neighborhood_mode?: NeighborhoodMode;
+  /**
+   * Next server release: whether session-summary memories may be recalled.
+   * Omitted: the server's choice (`DAKERA_RECALL_EXCLUDE_SUMMARIES`, default:
+   * they may).
+   */
+  include_summaries?: boolean;
 }
 
 /** COG-2 / KG-3: Response from the recall endpoint with optional associative memories */
 export interface RecallResponse {
-  /** Primary recalled memories */
+  /**
+   * Ranked memories (at most `top_k`), followed under
+   * `neighborhood_mode: "inline"` by neighbourhood context items, each with
+   * `retrieval: "neighborhood"`.
+   */
   memories: RecalledMemory[];
   /** COG-2 / KG-3: KG associated memories at configurable depth (only present when include_associated was true) */
   associated_memories?: RecalledMemory[];
+  /**
+   * Next server release, `neighborhood_mode: "separate"` only: neighbourhood
+   * context of the ranked results, each entry with `context_of` (the ranked
+   * memory it belongs to) and `retrieval: "neighborhood"`. Absent otherwise
+   * and on older servers.
+   */
+  context_memories?: RecalledMemory[];
+  /** Query embedding time in milliseconds. */
+  query_embedding_time_ms?: number;
+  /** Search time in milliseconds. */
+  search_time_ms?: number;
+  /** v0.12: what the cross-encoder did (same content as `rerank_report`). */
+  rerank?: RerankReport;
+  /** v0.12: what the cross-encoder did. */
+  rerank_report?: RerankReport;
+  /** Late-interaction strategy only: the first stage that served the recall. */
+  late_interaction_first_stage?: string;
+}
+
+/**
+ * Options of {@link DakeraClient.searchMemories} (`POST /v1/memory/search`).
+ * Undefined fields are not sent.
+ */
+export interface SearchMemoriesOptions {
+  /** v0.12: language of `query`. */
+  lang?: string;
+  /** Maximum results (server default 10; at most 500 with a query). */
+  top_k?: number;
+  /** Filter by memory type. */
+  memory_type?: string;
+  /** Only memories of this session. */
+  session_id?: string;
+  /** Only memories carrying these tags. */
+  tags?: string[];
+  /** Minimum importance. */
+  min_importance?: number;
+  /** Maximum importance. */
+  max_importance?: number;
+  /** Only memories created after this unix time (seconds). */
+  created_after?: number;
+  /** Only memories created before this unix time (seconds). */
+  created_before?: number;
+  /** Sort field: `created_at`, `last_accessed_at`, `importance`, `access_count`. */
+  sort_by?: 'created_at' | 'last_accessed_at' | 'importance' | 'access_count';
+  /** CE-10: retrieval routing mode. */
+  routing?: RoutingMode;
+  /** CE-13: cross-encoder reranking (server default `false` for search). */
+  rerank?: boolean;
 }
 
 /** Response from storing a memory.
@@ -846,10 +1069,10 @@ export function isKnownFusionStrategy(value: unknown): value is KnownFusionStrat
   return (KNOWN_FUSION_STRATEGIES as readonly unknown[]).includes(value);
 }
 
-export interface RecallRequest {
+export interface RecallRequest extends MemoryRecallOptions {
   /** Natural language query */
   query: string;
-  /** Number of results */
+  /** Number of results (server default 10). */
   top_k?: number;
   /** Filter by memory type */
   memory_type?: string;
@@ -865,9 +1088,14 @@ export interface RecallRequest {
   associated_memories_min_weight?: number;
   /** CE-10: retrieval routing mode. Default: `"auto"` (server picks best strategy). */
   routing?: RoutingMode;
-  /** CE-13: enable cross-encoder reranking. Default: `undefined` (server uses `true` for recall). Pass `false` to disable on latency-sensitive paths. */
+  /**
+   * CE-13: enable cross-encoder reranking. Default: `undefined` (server uses
+   * `true` for recall). The candidate pool is sized from the ranking depth
+   * `max(top_k, 10)` — on hybrid routing 10x that depth, not `top_k * 3`.
+   * Pass `false` to disable on latency-sensitive paths.
+   */
   rerank?: boolean;
-  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2). */
+  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2; `"rrf"` is not the default). */
   fusion?: FusionStrategy;
   /** CE-17: explicit vector/BM25 weight for Hybrid routing (0.0–1.0). When set, overrides the adaptive heuristic from QueryClassifier. Omit for adaptive defaults (recommended). Only effective when `routing="hybrid"`. */
   vector_weight?: number;
@@ -1841,11 +2069,24 @@ export interface CacheStats {
 }
 
 /** Slow query info */
+/** One slow-query log entry (`GET /admin/slow-queries` → `queries[]`). */
 export interface SlowQuery {
-  query: string;
+  /** Entry id (server `id`). */
+  id?: string;
+  /** @deprecated Not sent by the server; see `parameters` / `query_type`. */
+  query?: string;
   duration_ms: number;
-  timestamp: string;
+  /** Unix time as the server sends it. */
+  timestamp: string | number;
   namespace?: string;
+  /** `vector_search`, `full_text_search`, `hybrid_search`, ... */
+  query_type?: string;
+  /** Query parameters the server recorded. */
+  parameters?: unknown;
+  results_count?: number;
+  vectors_scanned?: number;
+  /** Fields of newer servers. */
+  [key: string]: unknown;
 }
 
 /** Backup type. */
@@ -2071,13 +2312,19 @@ export interface KeyInfo {
   inert_namespaces?: string[];
 }
 
-/** Request to create an API key (`POST /admin/keys`). */
+/**
+ * Request to create an API key (`POST /admin/keys`).
+ *
+ * The server refuses unknown fields with 422 (next server release), and the
+ * SDK sends only these four. The former `permissions` and `expires_at` fields
+ * were never read by any server (a key created with `expires_at` never
+ * expired): use `scope` and `expires_in_days`. Passing them now throws a
+ * `ValidationError` before anything is sent.
+ */
 export interface CreateKeyRequest {
   name: string;
-  permissions?: string[];
-  expires_at?: string;
-  /** Scope of the new key (`read`, `write`, `admin`, `super_admin`). */
-  scope?: string;
+  /** Scope of the new key (`read`, `write`, `admin`, `super_admin`). Required by the server. */
+  scope: string;
   /**
    * Namespace grants (`null` = every namespace, `[]` = none). Server v0.12.2+
    * validates every entry (400 naming it) and accepts prefix patterns `p*`.
@@ -2751,12 +2998,21 @@ export interface ExtractionResult {
 // SEC-3: AES-256-GCM Encryption Key Rotation
 // =============================================================================
 
-/** Request body for POST /v1/admin/encryption/rotate-key (SEC-3). */
+/**
+ * Request body for POST /v1/admin/encryption/rotate-key (SEC-3). The server
+ * refuses unknown fields with 422 (next server release); the SDK sends only
+ * these, and only when defined.
+ */
 export interface RotateEncryptionKeyRequest {
-  /** New passphrase or 64-char hex key to rotate to. */
-  new_key: string;
-  /** If set, rotate only memories in this namespace. Omit to rotate all. */
+  /**
+   * New passphrase or 64-char hex key to derive the new data key from.
+   * Omitted: the server generates a random 256-bit key.
+   */
+  new_key?: string;
+  /** If set, rotate only this namespace. Omit to rotate the global key (every namespace). */
   namespace?: string;
+  /** Seconds to wait for the re-seal before answering (server default 10, max 300, 0 = answer at once). */
+  wait_secs?: number;
 }
 
 /** Response from POST /v1/admin/encryption/rotate-key (SEC-3). */
@@ -2764,6 +3020,24 @@ export interface RotateEncryptionKeyResponse {
   rotated: number;
   skipped: number;
   namespaces: string[];
+  /** v0.12: id of the new data key. */
+  key_id?: string;
+  /** v0.12: id of the key it replaced. */
+  previous_key_id?: string;
+  /** v0.12: `global` or `namespace`. */
+  scope?: string;
+  /** v0.12: the namespace rotated on its own, when `scope` is `namespace`. */
+  namespace?: string;
+  /** v0.12: state of the background re-seal. */
+  reseal?: string;
+  /** v0.12: BM25 indexes re-sealed. */
+  fulltext_indices_rotated?: number;
+  /** v0.12: namespaces whose re-seal failed (omitted when empty). */
+  failed_namespaces?: string[];
+  /** v0.12: what the operator must still do (e.g. set `DAKERA_ENCRYPTION_KEY`). */
+  action_required?: string;
+  /** v0.12: where to follow the re-seal (`GET /admin/encryption/status`). */
+  status_url?: string;
 }
 
 // =============================================================================
@@ -3239,13 +3513,29 @@ export interface QuotaCheckResult {
   exceeded_quota?: string;
 }
 
+/** Response from GET /admin/namespaces (server admin listing). */
+export interface AdminNamespaceList {
+  /** Every namespace with its stats (fields as the server sends them). */
+  namespaces: Array<Record<string, unknown>>;
+  /** Total namespace count. */
+  total: number;
+  /** Total vectors across all namespaces. */
+  total_vectors: number;
+  /** Fields of newer servers. */
+  [key: string]: unknown;
+}
+
 /** Response from GET /admin/backups. */
 export interface BackupListResponse {
   backups: BackupInfo[];
   total: number;
 }
 
-/** Request for POST /admin/backups. */
+/**
+ * Request for POST /admin/backups. The server refuses unknown fields with 422
+ * (next server release; `encrypted` for `encrypt` used to write a plaintext
+ * backup in silence); the SDK sends only these, and only when defined.
+ */
 export interface CreateBackupRequest {
   name: string;
   backup_type?: BackupType;

@@ -33,24 +33,152 @@ function parseErrorCode(raw: unknown): ErrorCode {
   return ErrorCode.UNKNOWN;
 }
 
-/** Flatten server's nested recall item `{memory: {...}, score, weighted_score, smart_score}` to flat `RecalledMemory`. */
+/**
+ * Flatten the server's nested recall item `{memory: {...}, score, weighted_score,
+ * smart_score, ...}` to a flat `RecalledMemory`. Every result-level field the
+ * server sends (`depth`, `vector_score`, `text_score`, `matched_text`,
+ * `matched_ids`, `retrieval`, `context_of`, and any newer one) is kept; a field
+ * an older server does not send stays absent. Object spread defines own data
+ * properties, so a `"__proto__"` key in a response cannot change a prototype.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function flattenRecalledMemory(item: any): any {
   if (item && typeof item === 'object' && item.memory && typeof item.memory === 'object') {
+    const { memory, score: _rawScore, ...result } = item;
     // smart_score is the server's ranking key; prefer it so .score reflects actual rank order.
     const score = item.smart_score ?? item.weighted_score ?? item.score;
-    return {
-      ...item.memory,
-      score,
-      smart_score: item.smart_score,
-      weighted_score: item.weighted_score,
-      depth: item.depth,
-    };
+    return { ...memory, ...result, score };
   }
   return item;
 }
 
+/** Flatten an optional array of recall items; `undefined` when absent. */
+function flattenRecalledList(raw: unknown): RecalledMemory[] | undefined {
+  return Array.isArray(raw) ? raw.map(flattenRecalledMemory) : undefined;
+}
+
+/**
+ * Build the JSON body of a request whose server struct refuses unknown fields
+ * (`deny_unknown_fields`, 422): copy the `allowed` fields that are not
+ * `undefined` (`null` is kept: it means something to the server) and throw a
+ * `ValidationError` naming any other field that holds a value, before anything
+ * is sent. Only own enumerable properties are read, so nothing inherited
+ * (including a polluted `Object.prototype`) can reach the wire.
+ */
+function strictBody(
+  route: string,
+  input: object | undefined,
+  allowed: readonly string[],
+  hints: Readonly<Record<string, string>> = {},
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input === undefined || input === null) return body;
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (!allowed.includes(key)) {
+      const hint = Object.prototype.hasOwnProperty.call(hints, key) ? ` ${hints[key]}` : '';
+      throw new ValidationError(
+        `${route} does not accept the field '${key}' (accepted: ${allowed.join(', ')}).${hint}`,
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    body[key] = value;
+  }
+  return body;
+}
+
+/**
+ * Fields the server's `deny_unknown_fields` request structs accept (next
+ * server release, issue #920 F10). Anything else is a 422 there and a
+ * `ValidationError` here.
+ */
+const CREATE_KEY_FIELDS = ['name', 'scope', 'namespaces', 'expires_in_days'] as const;
+/** `CreateNamespaceKeyRequest` minus `name` (a separate argument). */
+const CREATE_NAMESPACE_KEY_OPTION_FIELDS = ['scope', 'extra_namespaces', 'expires_in_days'] as const;
+const CREATE_BACKUP_FIELDS = ['name', 'backup_type', 'namespaces', 'encrypt', 'compression'] as const;
+const ROTATE_ENCRYPTION_KEY_FIELDS = ['new_key', 'namespace', 'wait_secs'] as const;
+
+/** Fields of {@link MemoryRecallOptions}, in the order they are sent. */
+const RECALL_OPTION_KEYS = [
+  'top_k', 'memory_type', 'session_id', 'tags', 'min_importance', 'importance_weighted',
+  'include_associated', 'associated_memories_cap', 'associated_memories_depth',
+  'associated_memories_min_weight', 'since', 'until', 'routing', 'rerank', 'rerank_candidates',
+  'fusion', 'vector_weight', 'iterations', 'neighborhood', 'neighborhood_mode',
+  'include_summaries', 'lang',
+] as const satisfies readonly (keyof MemoryRecallOptions)[];
+
+/** Fields of {@link SearchMemoriesOptions}. */
+const SEARCH_OPTION_KEYS = [
+  'top_k', 'memory_type', 'session_id', 'tags', 'min_importance', 'max_importance',
+  'created_after', 'created_before', 'sort_by', 'routing', 'rerank', 'lang',
+] as const satisfies readonly (keyof SearchMemoriesOptions)[];
+
+/** Methods a client may repeat without changing the outcome (RFC 9110 §9.2.2). */
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS']);
+
+/**
+ * POST routes that only read, so a retry after a timeout or a 5xx is safe.
+ * Matched against the path without its query string.
+ */
+const READ_ONLY_POST_ROUTES: readonly RegExp[] = [
+  /^\/v1\/memory\/(recall|search)$/,
+  /^\/v1\/memories\/recall\/batch$/,
+  /^\/v1\/namespaces\/[^/]+\/(query|batch-query|multi-vector|unified-query|aggregate|explain|query-text|batch-query-text|hybrid|export)$/,
+  /^\/v1\/namespaces\/[^/]+\/fulltext\/search$/,
+  /^\/v1\/namespaces\/[^/]+\/vectors\/count$/,
+  /^\/v1\/knowledge\/(graph|graph\/full|network\/cross-agent)$/,
+  /^\/v1\/route$/,
+  /^(\/v1)?\/admin\/quotas\/[^/]+\/check$/,
+];
+
+/** Whether a request may be retried after a timeout, a network error or a 5xx. */
+function isIdempotentRequest(method: string, path: string): boolean {
+  if (IDEMPOTENT_METHODS.has(method.toUpperCase())) return true;
+  if (method.toUpperCase() !== 'POST') return false;
+  const bare = path.split('?')[0];
+  return READ_ONLY_POST_ROUTES.some((re) => re.test(bare));
+}
+
+/**
+ * `Retry-After` in seconds: delta-seconds or an HTTP-date (RFC 9110 §10.2.3).
+ * `undefined` when absent or unparseable; never negative.
+ */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  const at = Date.parse(trimmed);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000));
+}
+
+/**
+ * A URL safe to put in an error message: user-info and the values of
+ * credential-like query parameters are replaced.
+ */
+function redactUrl(url: string): string {
+  return url
+    .replace(/\/\/[^/@?#]*@/, '//[REDACTED]@')
+    .replace(/([?&](?:api_key|apikey|key|token|access_token)=)[^&#]*/gi, '$1[REDACTED]');
+}
+
+/**
+ * `JSON.parse` that drops `__proto__` keys, for payloads the SDK merges into
+ * its own objects (SSE events).
+ */
+function safeJsonParse(text: string): unknown {
+  return JSON.parse(text, (key, value) => (key === '__proto__' ? undefined : value));
+}
+
+/** Longest SSE event (bytes of text) the stream parser buffers before failing. */
+const MAX_SSE_EVENT_CHARS = 1024 * 1024;
+
 import type {
+  MemoryRecallOptions,
+  SearchMemoriesOptions,
+  AdminNamespaceList,
   AdminConfig,
   AgentMemoriesOptions,
   CreateAgentResponse,
@@ -277,7 +405,7 @@ import type {
   WaitForJobOptions,
   WaitUntilReadyOptions,
 } from './types';
-import { computeTifScore } from './types';
+import { computeTifScore, isNeighborhoodMode, NEIGHBORHOOD_MODES } from './types';
 
 /**
  * A graph edge as the server sends it (`from_id`, `to_id`, ...), with the
@@ -332,11 +460,16 @@ const SDK_VERSION = '0.12.2';
  */
 export class DakeraClient {
   private readonly baseUrl: string;
-  private readonly apiKey?: string;
+  /**
+   * The API key, in an ECMAScript private field: not enumerable, so it is not
+   * in `JSON.stringify(client)`, `Object.keys(client)` or `console.log(client)`.
+   */
+  readonly #apiKey?: string;
   private readonly timeout: number;
   private readonly connectTimeout: number;
   private readonly retryConfig: Required<import('./types').RetryConfig>;
-  private readonly headers: Record<string, string>;
+  /** Request headers, `Authorization` included (private for the same reason). */
+  readonly #headers: Record<string, string>;
   /** ODE-2: base URL of the dakera-ode sidecar. */
   private readonly odeUrl?: string;
   /** OPS-1: rate-limit headers from the most recent API response. */
@@ -354,7 +487,7 @@ export class DakeraClient {
     }
 
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
-    this.apiKey = options.apiKey;
+    this.#apiKey = options.apiKey;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.connectTimeout = options.connectTimeout ?? this.timeout;
     this.odeUrl = options.odeUrl?.replace(/\/$/, '');
@@ -368,16 +501,31 @@ export class DakeraClient {
       jitter: rb.jitter ?? true,
     };
 
-    this.headers = {
+    this.#headers = {
       'Content-Type': 'application/json',
       // User-Agent is honored in Node; browsers drop it (forbidden header).
       'User-Agent': `dakera-js/${SDK_VERSION}`,
       ...options.headers,
     };
 
-    if (this.apiKey) {
-      this.headers['Authorization'] = `Bearer ${this.apiKey}`;
+    if (this.#apiKey) {
+      this.#headers['Authorization'] = `Bearer ${this.#apiKey}`;
     }
+  }
+
+  /** What `JSON.stringify(client)` shows: never the API key or the headers. */
+  toJSON(): { baseUrl: string; hasApiKey: boolean } {
+    return { baseUrl: redactUrl(this.baseUrl), hasApiKey: this.#apiKey !== undefined };
+  }
+
+  /** `String(client)`: never the API key. */
+  toString(): string {
+    return `DakeraClient(${redactUrl(this.baseUrl)})`;
+  }
+
+  /** Node's `util.inspect` / `console.log(client)`: never the API key. */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return `DakeraClient { baseUrl: '${redactUrl(this.baseUrl)}', apiKey: ${this.#apiKey ? "'[REDACTED]'" : 'undefined'} }`;
   }
 
   /**
@@ -468,89 +616,78 @@ export class DakeraClient {
 
   /**
    * Make an HTTP request with retry logic and exponential backoff.
+   *
+   * Each attempt runs under its own AbortController, armed for the whole
+   * attempt (response headers AND body). Retries are made only when safe:
+   * 429 and 503 for every method (the server did not process the request),
+   * other 5xx, timeouts and network errors only for idempotent requests
+   * ({@link isIdempotentRequest}). `Retry-After` is honoured, capped at
+   * {@link MAX_RETRY_AFTER_SECONDS}.
    */
   private async request<T>(
     method: string,
     path: string,
     body?: unknown,
-    opts?: { retry?: boolean; rawBody?: BodyInit; contentType?: string; asBytes?: boolean }
+    opts?: { retry?: boolean; rawBody?: BodyInit; contentType?: string; asBytes?: boolean; accept?: string }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const maxRetries = opts?.retry === false ? 1 : this.retryConfig.maxRetries;
-    // connectTimeout governs the initial connection phase; timeout governs the full request
-    const connectMs = Math.min(this.connectTimeout, this.timeout);
+    const maxAttempts = opts?.retry === false ? 1 : Math.max(1, this.retryConfig.maxRetries);
+    const idempotent = isIdempotentRequest(method, path);
+    // fetch has no separate connect phase: the shorter bound covers the attempt.
+    const attemptMs = Math.min(this.connectTimeout, this.timeout);
     let lastError: Error | undefined;
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const isLast = attempt === maxAttempts - 1;
+      const controller = new AbortController();
+      const timerId = setTimeout(() => controller.abort(), attemptMs);
       try {
-        const controller = new AbortController();
-        // connectTimeout governs TCP connect; timeout governs the full request.
-        // fetch does not expose a separate connect phase so we use the shorter
-        // of the two as a conservative bound for the entire round trip.
-        const timerId = setTimeout(() => controller.abort(), connectMs);
-
+        const headers: Record<string, string> = { ...this.#headers };
+        if (opts?.contentType) headers['Content-Type'] = opts.contentType;
+        if (opts?.accept) headers['Accept'] = opts.accept;
         const response = await fetch(url, {
           method,
-          headers: opts?.contentType
-            ? { ...this.headers, 'Content-Type': opts.contentType }
-            : this.headers,
-          body: opts?.rawBody ?? (body ? JSON.stringify(body) : undefined),
+          headers,
+          body: opts?.rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
           signal: controller.signal,
         });
-
-        clearTimeout(timerId);
-
+        // The body is read under the same deadline.
         return await this.handleResponse<T>(response, opts?.asBytes);
       } catch (error) {
-        if (error instanceof RateLimitError) {
-          if (attempt === maxRetries - 1) throw error;
-          const wait =
-            error.retryAfter != null
-              ? error.retryAfter * 1000
-              : this.computeBackoff(attempt);
-          await this.sleep(wait);
+        if (error instanceof DakeraError && error.statusCode !== undefined) {
+          const status = error.statusCode;
+          // 429 / 503: refused before processing — safe to repeat for any method.
+          const refused = status === 429 || status === 503;
+          // 501 is a configuration answer, other 4xx are the caller's: final.
+          const retryable = refused || (status >= 500 && status !== 501 && idempotent);
+          if (!retryable || isLast) throw error;
+          lastError = error;
+          const retryAfter = error instanceof RateLimitError && error.retryAfter != null
+            ? error.retryAfter
+            : error.retryAfterSeconds;
+          await this.sleep(
+            retryAfter != null
+              ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1000
+              : this.computeBackoff(attempt),
+          );
           continue;
         }
+        if (error instanceof DakeraError) throw error;
 
-        if (error instanceof DakeraError) {
-          if (
-            error.statusCode &&
-            error.statusCode >= 400 &&
-            error.statusCode < 500
-          ) {
-            throw error;
-          }
-          // 501 is a configuration answer (feature off / backend limit), not a
-          // transient failure: retrying cannot change it.
-          if (error.statusCode === 501) throw error;
-          if (attempt === maxRetries - 1) throw error;
-          lastError = error;
-          // v0.12: every 503 carries Retry-After (integer seconds). Wait what
-          // the server asked for instead of guessing with exponential backoff.
-          if (error.retryAfterSeconds != null) {
-            await this.sleep(Math.min(error.retryAfterSeconds, MAX_RETRY_AFTER_SECONDS) * 1000);
-            continue;
-          }
+        let mapped: Error;
+        if (error instanceof Error && error.name === 'AbortError') {
+          mapped = new TimeoutError(`Request timed out after ${attemptMs}ms (${method} ${redactUrl(url)})`);
         } else if (error instanceof Error) {
-          if (attempt === maxRetries - 1) {
-            if (error.name === 'AbortError') {
-              throw new TimeoutError(`Request timed out after ${connectMs}ms`);
-            }
-            if (error.message.includes('fetch')) {
-              throw new ConnectionError(`Failed to connect to ${url}: ${error.message}`);
-            }
-            throw error;
-          }
-          if (error.name === 'AbortError') {
-            lastError = new TimeoutError(`Request timed out after ${connectMs}ms`);
-          } else if (error.message.includes('fetch')) {
-            lastError = new ConnectionError(`Failed to connect to ${url}: ${error.message}`);
-          } else {
-            lastError = error;
-          }
+          mapped = new ConnectionError(`Failed to connect to ${redactUrl(url)}: ${error.message}`);
+        } else {
+          mapped = new ConnectionError(`Failed to connect to ${redactUrl(url)}`);
         }
-
+        // The request may have reached the server: repeat it only if that is safe.
+        if (!idempotent || isLast) throw mapped;
+        lastError = mapped;
         await this.sleep(this.computeBackoff(attempt));
+      } finally {
+        clearTimeout(timerId);
       }
     }
 
@@ -587,11 +724,27 @@ export class DakeraClient {
       // a malformed body: never let a parse failure hide the status code.
       try {
         body = await response.json();
-      } catch {
+      } catch (error) {
+        // A timeout while reading the body is a timeout, whatever the status.
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        // A success whose JSON does not parse must not pass for `undefined`.
+        if (response.ok) {
+          throw new DakeraError(
+            `Invalid JSON in the server's ${response.status} response`,
+            response.status,
+          );
+        }
         body = undefined;
       }
     } else if (response.status !== 204) {
-      body = await response.text();
+      try {
+        body = await response.text();
+      } catch (error) {
+        // A failed body read of a success is a transport failure; of an
+        // error answer, the status code still says what happened.
+        if (response.ok) throw error;
+        body = undefined;
+      }
     }
 
     if (response.ok) {
@@ -627,11 +780,8 @@ export class DakeraClient {
       if (typeof details === 'string') err.details = details;
       if (typeof resource === 'string') err.resource = resource;
     }
-    const ra = response.headers.get('Retry-After');
-    if (ra !== null) {
-      const secs = parseInt(ra, 10);
-      if (!isNaN(secs) && secs >= 0) err.retryAfterSeconds = secs;
-    }
+    const secs = parseRetryAfter(response.headers.get('Retry-After'));
+    if (secs !== undefined) err.retryAfterSeconds = secs;
     return err;
   }
 
@@ -656,16 +806,14 @@ export class DakeraClient {
         return new PayloadTooLargeError(errorMessage, response.status, body, code);
       case 501:
         return new NotImplementedError(errorMessage, response.status, body, code);
-      case 429: {
-        const retryAfter = response.headers.get('Retry-After');
+      case 429:
         return new RateLimitError(
           'Rate limit exceeded',
           response.status,
           body,
-          retryAfter ? parseInt(retryAfter, 10) : undefined,
+          parseRetryAfter(response.headers.get('Retry-After')),
           code
         );
-      }
       default:
         if (response.status >= 500) {
           return new ServerError(errorMessage, response.status, body, code);
@@ -706,7 +854,7 @@ export class DakeraClient {
   async upsert(namespace: string, vectors: VectorInput[]): Promise<UpsertResponse> {
     return this.request<UpsertResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/vectors`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/vectors`,
       { vectors }
     );
   }
@@ -754,7 +902,7 @@ export class DakeraClient {
       };
     }
 
-    return this.request<SearchResult>('POST', `/v1/namespaces/${namespace}/query`, body);
+    return this.request<SearchResult>('POST', `/v1/namespaces/${encodeURIComponent(namespace)}/query`, body);
   }
 
   /**
@@ -782,7 +930,7 @@ export class DakeraClient {
     if (options.filter) body.filter = options.filter;
     if (options.deleteAll) body.delete_all = true;
 
-    return this.request<DeleteResponse>('POST', `/v1/namespaces/${namespace}/vectors/delete`, body);
+    return this.request<DeleteResponse>('POST', `/v1/namespaces/${encodeURIComponent(namespace)}/vectors/delete`, body);
   }
 
   /** Bulk update vector metadata matching a filter. */
@@ -868,7 +1016,7 @@ export class DakeraClient {
 
     const response = await this.request<{ results: SearchResult[] }>(
       'POST',
-      `/v1/namespaces/${namespace}/batch-query`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/batch-query`,
       body
     );
     return response.results;
@@ -891,7 +1039,7 @@ export class DakeraClient {
   ): Promise<{ indexed_count: number }> {
     return this.request<{ indexed_count: number }>(
       'POST',
-      `/v1/namespaces/${namespace}/fulltext/index`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/index`,
       { documents }
     );
   }
@@ -917,7 +1065,7 @@ export class DakeraClient {
 
     const response = await this.request<{ results: FullTextSearchResult[] }>(
       'POST',
-      `/v1/namespaces/${namespace}/fulltext/search`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/fulltext/search`,
       body
     );
     return response.results;
@@ -966,7 +1114,7 @@ export class DakeraClient {
 
     const response = await this.request<{ results: HybridSearchResult[] }>(
       'POST',
-      `/v1/namespaces/${namespace}/hybrid`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/hybrid`,
       body
     );
     return response.results;
@@ -988,7 +1136,9 @@ export class DakeraClient {
     }>('GET', '/v1/namespaces');
     const kinds = response.kinds ?? {};
     return response.namespaces.map((ns) => {
-      const kind = kinds[ns];
+      // Own keys only: a namespace named like an Object.prototype member
+      // (`constructor`, `__proto__`) must not pick up an inherited value.
+      const kind = Object.prototype.hasOwnProperty.call(kinds, ns) ? kinds[ns] : undefined;
       return kind !== undefined
         ? { namespace: ns, vector_count: 0, kind }
         : { namespace: ns, vector_count: 0 };
@@ -1002,31 +1152,44 @@ export class DakeraClient {
    * @returns Namespace info
    */
   async getNamespace(namespace: string): Promise<NamespaceInfo> {
-    return this.request<NamespaceInfo>('GET', `/v1/namespaces/${namespace}`);
+    return this.request<NamespaceInfo>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}`);
   }
 
   /**
-   * Create a new namespace.
+   * Create (or reconfigure) a namespace — `PUT /v1/namespaces/{ns}`.
+   *
+   * The server reads `dimension` (required) and `distance`; `indexType` and
+   * `metadata` are not server fields and are not sent (`indexType` is still
+   * checked against the server's capabilities when they are known).
    *
    * @param namespace - Namespace name
-   * @param options - Creation options
+   * @param options - `dimensions` (required by the server) and `distance`
    * @returns Created namespace info
    */
   async createNamespace(
     namespace: string,
-    options: { dimensions?: number; indexType?: string; metadata?: Record<string, unknown> } = {}
+    options: {
+      dimensions?: number;
+      distance?: import('./types').DistanceMetric;
+      /** @deprecated Not a server field; never sent. */
+      indexType?: string;
+      /** @deprecated Not a server field; never sent. */
+      metadata?: Record<string, unknown>;
+    } = {}
   ): Promise<NamespaceInfo> {
     const body: Record<string, unknown> = {};
-    if (options.dimensions) body.dimension = options.dimensions;
+    if (options.dimensions !== undefined) body.dimension = options.dimensions;
+    if (options.distance !== undefined) {
+      await this.preflightCheck('distance_metric', options.distance);
+      body.distance = options.distance;
+    }
     if (options.indexType) {
       await this.preflightCheck('index_kind', options.indexType);
-      body.index_type = options.indexType;
     }
-    if (options.metadata) body.metadata = options.metadata;
 
     const response = await this.request<ConfigureNamespaceResponse>(
       'PUT',
-      `/v1/namespaces/${namespace}`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}`,
       body
     );
     return { namespace: response.namespace, vector_count: 0, dimension: response.dimension };
@@ -1049,7 +1212,7 @@ export class DakeraClient {
     if (request.distance) {
       await this.preflightCheck('distance_metric', request.distance);
     }
-    return this.request<ConfigureNamespaceResponse>('PUT', `/v1/namespaces/${namespace}`, request);
+    return this.request<ConfigureNamespaceResponse>('PUT', `/v1/namespaces/${encodeURIComponent(namespace)}`, request);
   }
 
   /**
@@ -1058,7 +1221,7 @@ export class DakeraClient {
    * @param namespace - Namespace name
    */
   async deleteNamespace(namespace: string): Promise<void> {
-    await this.request<void>('DELETE', `/v1/namespaces/${namespace}`);
+    await this.request<void>('DELETE', `/v1/namespaces/${encodeURIComponent(namespace)}`);
   }
 
   // ===========================================================================
@@ -1218,7 +1381,7 @@ export class DakeraClient {
 
     return this.request<WarmCacheResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/cache/warm`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/cache/warm`,
       body
     );
   }
@@ -1289,7 +1452,7 @@ export class DakeraClient {
 
     return this.request<MultiVectorSearchResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/multi-vector`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/multi-vector`,
       body
     );
   }
@@ -1342,7 +1505,7 @@ export class DakeraClient {
 
     return this.request<UnifiedQueryResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/unified-query`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/unified-query`,
       body
     );
   }
@@ -1387,7 +1550,7 @@ export class DakeraClient {
 
     return this.request<AggregationResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/aggregate`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/aggregate`,
       body
     );
   }
@@ -1433,7 +1596,7 @@ export class DakeraClient {
 
     return this.request<ExportResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/export`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/export`,
       body
     );
   }
@@ -1498,7 +1661,7 @@ export class DakeraClient {
 
     return this.request<QueryExplainResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/explain`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/explain`,
       body
     );
   }
@@ -1549,7 +1712,7 @@ export class DakeraClient {
 
     return this.request<UpsertResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/upsert-columns`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/upsert-columns`,
       body
     );
   }
@@ -1600,7 +1763,7 @@ export class DakeraClient {
 
     return this.request<TextUpsertResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/upsert-text`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/upsert-text`,
       body
     );
   }
@@ -1652,7 +1815,7 @@ export class DakeraClient {
 
     return this.request<TextQueryResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/query-text`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/query-text`,
       body
     );
   }
@@ -1703,7 +1866,7 @@ export class DakeraClient {
 
     return this.request<BatchTextQueryResponse>(
       'POST',
-      `/v1/namespaces/${namespace}/batch-query-text`,
+      `/v1/namespaces/${encodeURIComponent(namespace)}/batch-query-text`,
       body
     );
   }
@@ -1718,48 +1881,69 @@ export class DakeraClient {
   }
 
   /**
-   * Recall memories for an agent.
+   * Recall memories for an agent (`POST /v1/memory/recall`).
+   *
+   * Every option is optional and left out of the request when `undefined`
+   * (snake_case, as on the wire). See {@link MemoryRecallOptions}.
+   *
+   * `top_k` and the neighbourhood: under the server's default
+   * `neighborhood_mode: "inline"`, session-adjacent context is appended to
+   * `memories` AFTER the `top_k` ranked results (each such item has
+   * `retrieval: "neighborhood"`, and its `score` is not comparable with the
+   * ranked ones). Pass `neighborhood_mode: "separate"` to get at most `top_k`
+   * `memories` and the context in `context_memories` (each with `context_of`),
+   * or `"off"` for none. Older servers ignore `neighborhood_mode` and
+   * `include_summaries`, and send none of the new response fields.
    *
    * @param agentId - Agent identifier
    * @param query - Semantic query text
-   * @param options - Optional recall parameters
-   * @param options.top_k - Number of primary results (default: 5)
-   * @param options.memory_type - Filter by memory type
-   * @param options.min_importance - Minimum importance threshold
-   * @param options.include_associated - COG-2: traverse KG and include
-   *   associatively linked memories in `associated_memories` (default: false)
-   * @param options.associated_memories_cap - COG-2: max associated memories (default: 10, max: 10)
-   * @param options.associated_memories_depth - KG-3: traversal depth 1–3 (default: 1); requires include_associated
-   * @param options.associated_memories_min_weight - KG-3: minimum edge weight for KG traversal (default: 0.0)
-   * @param options.since - CE-7: only recall memories created at or after this ISO-8601 timestamp
-   * @param options.until - CE-7: only recall memories created at or before this ISO-8601 timestamp
-   * @returns RecallResponse with `memories` and optionally `associated_memories` (each with `depth` field)
+   * @param options - Optional recall parameters ({@link MemoryRecallOptions})
+   * @returns RecallResponse with `memories`, and `associated_memories` /
+   *   `context_memories` when the server returned them
+   *
+   * @example
+   * ```ts
+   * const res = await client.recall('agent-1', 'deploy port', {
+   *   top_k: 5,
+   *   neighborhood_mode: 'separate',
+   * });
+   * res.memories.length <= 5;                  // true
+   * res.context_memories?.[0]?.context_of;     // id of a ranked memory
+   * ```
    */
-  async recall(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; include_associated?: boolean; associated_memories_cap?: number; associated_memories_depth?: number; associated_memories_min_weight?: number; since?: string; until?: string; routing?: import('./types').RoutingMode; rerank?: boolean; tags?: string[] }): Promise<RecallResponse> {
+  async recall(agentId: string, query: string, options?: MemoryRecallOptions): Promise<RecallResponse> {
+    if (options?.neighborhood_mode !== undefined && !isNeighborhoodMode(options.neighborhood_mode)) {
+      throw new ValidationError(
+        `neighborhood_mode must be one of ${NEIGHBORHOOD_MODES.join(', ')} (got '${String(options.neighborhood_mode)}')`,
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
     const body: Record<string, unknown> = { query };
-    if (options?.top_k !== undefined) body['top_k'] = options.top_k;
-    if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
-    if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
-    if (options?.include_associated) body['include_associated'] = true;
-    if (options?.associated_memories_cap !== undefined) body['associated_memories_cap'] = options.associated_memories_cap;
-    if (options?.associated_memories_depth !== undefined) body['associated_memories_depth'] = options.associated_memories_depth;
-    if (options?.associated_memories_min_weight !== undefined) body['associated_memories_min_weight'] = options.associated_memories_min_weight;
-    if (options?.since !== undefined) body['since'] = options.since;
-    if (options?.until !== undefined) body['until'] = options.until;
-    if (options?.routing !== undefined) body['routing'] = options.routing;
-    if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    if (options?.lang !== undefined) body['lang'] = options.lang;
-    if (options?.tags !== undefined) body['tags'] = options.tags;
-    const raw = await this.request<{ memories: Array<unknown>; associated_memories?: Array<unknown> }>('POST', '/v1/memory/recall', { ...body, agent_id: agentId });
-    return {
-      memories: (raw.memories ?? []).map(flattenRecalledMemory),
-      ...(raw.associated_memories ? { associated_memories: raw.associated_memories.map(flattenRecalledMemory) } : {}),
+    if (options !== undefined) {
+      for (const key of RECALL_OPTION_KEYS) {
+        const value = options[key];
+        if (value !== undefined) body[key] = value;
+      }
+    }
+    body['agent_id'] = agentId;
+    const raw = await this.request<Record<string, unknown>>('POST', '/v1/memory/recall', body);
+    const { memories, associated_memories, context_memories, ...rest } = raw ?? {};
+    const response: RecallResponse = {
+      ...(rest as Omit<RecallResponse, 'memories'>),
+      memories: flattenRecalledList(memories) ?? [],
     };
+    const associated = flattenRecalledList(associated_memories);
+    if (associated !== undefined) response.associated_memories = associated;
+    const context = flattenRecalledList(context_memories);
+    if (context !== undefined) response.context_memories = context;
+    return response;
   }
 
   /** Get a specific memory */
   async getMemory(agentId: string, memoryId: string): Promise<Memory> {
-    return this.request<Memory>('GET', `/v1/memory/get/${memoryId}?agent_id=${encodeURIComponent(agentId)}`);
+    return this.request<Memory>('GET', `/v1/memory/get/${encodeURIComponent(memoryId)}?agent_id=${encodeURIComponent(agentId)}`);
   }
 
   /**
@@ -2012,20 +2196,25 @@ export class DakeraClient {
     );
   }
 
-  /** Search memories for an agent */
-  async searchMemories(agentId: string, query: string, options?: { lang?: string; top_k?: number; memory_type?: string; min_importance?: number; routing?: import('./types').RoutingMode; rerank?: boolean; tags?: string[] }): Promise<RecalledMemory[]> {
+  /**
+   * Search memories for an agent (`POST /v1/memory/search`). Undefined options
+   * are not sent. Items carry the same result fields as recall, including
+   * `matched_text` / `matched_ids` when the server collapses derived sentence
+   * sub-memories (next server release, `DAKERA_RECALL_COLLAPSE_DERIVED`).
+   */
+  async searchMemories(agentId: string, query: string, options?: SearchMemoriesOptions): Promise<RecalledMemory[]> {
     const body: Record<string, unknown> = { query };
-    if (options?.top_k !== undefined) body['top_k'] = options.top_k;
-    if (options?.memory_type !== undefined) body['memory_type'] = options.memory_type;
-    if (options?.min_importance !== undefined) body['min_importance'] = options.min_importance;
-    if (options?.routing !== undefined) body['routing'] = options.routing;
-    if (options?.rerank !== undefined) body['rerank'] = options.rerank;
-    if (options?.lang !== undefined) body['lang'] = options.lang;
-    if (options?.tags !== undefined) body['tags'] = options.tags;
-    const result = await this.request<{ memories: Array<unknown> } | Array<unknown>>('POST', '/v1/memory/search', { ...body, agent_id: agentId });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward-compat: older servers return flat array
-    const items: Array<unknown> = (result as any).memories ?? result;
-    return (Array.isArray(items) ? items : []).map(flattenRecalledMemory);
+    if (options !== undefined) {
+      for (const key of SEARCH_OPTION_KEYS) {
+        const value = options[key];
+        if (value !== undefined) body[key] = value;
+      }
+    }
+    body['agent_id'] = agentId;
+    const result = await this.request<{ memories: Array<unknown> } | Array<unknown>>('POST', '/v1/memory/search', body);
+    // Older servers answered a bare array.
+    const items: unknown = Array.isArray(result) ? result : result?.memories;
+    return flattenRecalledList(items) ?? [];
   }
 
   /** Update importance of memories */
@@ -2089,7 +2278,7 @@ export class DakeraClient {
    * @param signal    Feedback signal.
    */
   async feedbackMemory(memoryId: string, agentId: string, signal: FeedbackSignal): Promise<FeedbackResponse> {
-    return this.request<FeedbackResponse>('POST', `/v1/memories/${memoryId}/feedback`, { agent_id: agentId, signal });
+    return this.request<FeedbackResponse>('POST', `/v1/memories/${encodeURIComponent(memoryId)}/feedback`, { agent_id: agentId, signal });
   }
 
   /**
@@ -2098,7 +2287,7 @@ export class DakeraClient {
    * @param memoryId  The memory whose feedback history to retrieve.
    */
   async getMemoryFeedbackHistory(memoryId: string): Promise<FeedbackHistoryResponse> {
-    return this.request<FeedbackHistoryResponse>('GET', `/v1/memories/${memoryId}/feedback`);
+    return this.request<FeedbackHistoryResponse>('GET', `/v1/memories/${encodeURIComponent(memoryId)}/feedback`);
   }
 
   /**
@@ -2121,7 +2310,7 @@ export class DakeraClient {
    * @param agentId  The agent to summarise feedback for.
    */
   async getAgentFeedbackSummary(agentId: string): Promise<AgentFeedbackSummary> {
-    return this.request<AgentFeedbackSummary>('GET', `/v1/agents/${agentId}/feedback/summary`);
+    return this.request<AgentFeedbackSummary>('GET', `/v1/agents/${encodeURIComponent(agentId)}/feedback/summary`);
   }
 
   /**
@@ -2132,7 +2321,7 @@ export class DakeraClient {
    * @param importance  New importance value (0.0–1.0).
    */
   async patchMemoryImportance(memoryId: string, agentId: string, importance: number): Promise<FeedbackResponse> {
-    return this.request<FeedbackResponse>('PATCH', `/v1/memories/${memoryId}/importance`, { agent_id: agentId, importance });
+    return this.request<FeedbackResponse>('PATCH', `/v1/memories/${encodeURIComponent(memoryId)}/importance`, { agent_id: agentId, importance });
   }
 
   /**
@@ -2429,7 +2618,7 @@ export class DakeraClient {
     const body: Record<string, unknown> = {};
     if (options?.summary !== undefined) body.summary = options.summary;
     if (options?.auto_summarize !== undefined) body.auto_summarize = options.auto_summarize;
-    return this.request<SessionEndResponse>('POST', `/v1/sessions/${sessionId}/end`, body);
+    return this.request<SessionEndResponse>('POST', `/v1/sessions/${encodeURIComponent(sessionId)}/end`, body);
   }
 
   /**
@@ -2451,7 +2640,7 @@ export class DakeraClient {
 
   /** Get session details */
   async getSession(sessionId: string): Promise<Session> {
-    return this.request<Session>('GET', `/v1/sessions/${sessionId}`);
+    return this.request<Session>('GET', `/v1/sessions/${encodeURIComponent(sessionId)}`);
   }
 
   /** List sessions */
@@ -2488,7 +2677,7 @@ export class DakeraClient {
     const qs = params.toString();
     const raw = await this.request<RecalledMemory[] | { memories?: RecalledMemory[] }>(
       'GET',
-      `/v1/sessions/${sessionId}/memories${qs ? `?${qs}` : ''}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/memories${qs ? `?${qs}` : ''}`,
     );
     // The server answers `{session, memories, total}`; a bare array is accepted too.
     return Array.isArray(raw) ? raw : (raw?.memories ?? []);
@@ -2535,12 +2724,12 @@ export class DakeraClient {
       params.set('content_preview_chars', String(options.content_preview_chars));
     }
     const qs = params.toString();
-    return this.request<RecalledMemory[]>('GET', `/v1/agents/${agentId}/memories${qs ? `?${qs}` : ''}`);
+    return this.request<RecalledMemory[]>('GET', `/v1/agents/${encodeURIComponent(agentId)}/memories${qs ? `?${qs}` : ''}`);
   }
 
   /** Get stats for an agent */
   async agentStats(agentId: string): Promise<AgentStats> {
-    return this.request<AgentStats>('GET', `/v1/agents/${agentId}/stats`);
+    return this.request<AgentStats>('GET', `/v1/agents/${encodeURIComponent(agentId)}/stats`);
   }
 
   /** Get sessions for an agent */
@@ -2549,7 +2738,7 @@ export class DakeraClient {
     if (options?.active_only !== undefined) params.set('active_only', String(options.active_only));
     if (options?.limit !== undefined) params.set('limit', String(options.limit));
     const qs = params.toString();
-    return this.request<Session[]>('GET', `/v1/agents/${agentId}/sessions${qs ? `?${qs}` : ''}`);
+    return this.request<Session[]>('GET', `/v1/agents/${encodeURIComponent(agentId)}/sessions${qs ? `?${qs}` : ''}`);
   }
 
   /**
@@ -2572,7 +2761,7 @@ export class DakeraClient {
     if (options?.min_importance !== undefined) params.set('min_importance', String(options.min_importance));
     if (options?.include_derived !== undefined) params.set('include_derived', String(options.include_derived));
     const qs = params.toString();
-    return this.request<WakeUpResponse>('GET', `/v1/agents/${agentId}/wake-up${qs ? `?${qs}` : ''}`);
+    return this.request<WakeUpResponse>('GET', `/v1/agents/${encodeURIComponent(agentId)}/wake-up${qs ? `?${qs}` : ''}`);
   }
 
   /**
@@ -2585,7 +2774,7 @@ export class DakeraClient {
    * @returns {@link CompressResponse} with before/after counts and timing.
    */
   async compressAgent(agentId: string): Promise<CompressResponse> {
-    return this.request<CompressResponse>('POST', `/v1/agents/${agentId}/compress`);
+    return this.request<CompressResponse>('POST', `/v1/agents/${encodeURIComponent(agentId)}/compress`);
   }
 
   // ===========================================================================
@@ -2787,7 +2976,7 @@ export class DakeraClient {
 
   /** Optimize a namespace */
   async optimizeNamespace(namespace: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/v1/admin/namespaces/${namespace}/optimize`);
+    return this.request<{ status: string }>('POST', `/v1/admin/namespaces/${encodeURIComponent(namespace)}/optimize`);
   }
 
   /** Get index statistics across all namespaces */
@@ -2851,33 +3040,72 @@ export class DakeraClient {
     return this.request<SetQuotaResponse>('PUT', path, body);
   }
 
-  /** Get slow queries */
-  async slowQueries(options?: { limit?: number; minDurationMs?: number }): Promise<SlowQuery[]> {
+  /**
+   * Get slow queries (`GET /admin/slow-queries`, global Admin).
+   *
+   * The server filters by `namespace`, `queryType` and `limit` (default 100)
+   * and answers `{queries, total, threshold_ms}`; this returns `queries`.
+   * `minDurationMs` is not a server parameter: it is applied here, to the
+   * entries returned.
+   */
+  async slowQueries(options?: {
+    limit?: number;
+    minDurationMs?: number;
+    namespace?: string;
+    queryType?: string;
+  }): Promise<SlowQuery[]> {
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set('limit', String(options.limit));
-    if (options?.minDurationMs !== undefined) params.set('min_duration_ms', String(options.minDurationMs));
+    if (options?.namespace !== undefined) params.set('namespace', options.namespace);
+    if (options?.queryType !== undefined) params.set('query_type', options.queryType);
     const qs = params.toString();
-    return this.request<SlowQuery[]>('GET', `/v1/admin/slow-queries${qs ? `?${qs}` : ''}`);
+    const raw = await this.request<SlowQuery[] | { queries?: SlowQuery[] }>(
+      'GET',
+      `/v1/admin/slow-queries${qs ? `?${qs}` : ''}`,
+    );
+    const entries = Array.isArray(raw) ? raw : (raw?.queries ?? []);
+    const min = options?.minDurationMs;
+    return min === undefined ? entries : entries.filter((q) => q.duration_ms >= min);
   }
 
-  /** Create a backup */
+  /**
+   * Create a backup and return its `BackupInfo`.
+   *
+   * @deprecated Use {@link adminCreateBackup}, which takes the server's
+   * request (`name`, `backup_type`, `namespaces`, `encrypt`, `compression`)
+   * and returns the whole response. This method used to send
+   * `{include_data}`, a field no server reads and which a strict server
+   * (next release) refuses with 422; it now creates a full backup named
+   * `backup-<unix ms>`. `false` (metadata only) has no server equivalent and
+   * throws a `ValidationError`.
+   */
   async createBackup(includeData: boolean = true): Promise<BackupInfo> {
-    return this.request<BackupInfo>('POST', '/v1/admin/backups', { include_data: includeData });
+    if (!includeData) {
+      throw new ValidationError(
+        'The server has no metadata-only backup; use adminCreateBackup({ name, ... })',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    const res = await this.adminCreateBackup({ name: `backup-${Date.now()}` });
+    return res.backup;
   }
 
-  /** List all backups */
+  /** List all backups (the server answers `{backups, total}`; a bare array is accepted too). */
   async listBackups(): Promise<BackupInfo[]> {
-    return this.request<BackupInfo[]>('GET', '/v1/admin/backups');
+    const raw = await this.request<BackupInfo[] | BackupListResponse>('GET', '/v1/admin/backups');
+    return Array.isArray(raw) ? raw : (raw?.backups ?? []);
   }
 
-  /** Restore a backup */
-  async restoreBackup(backupId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/v1/admin/backups/restore', { backup_id: backupId });
+  /** Restore a backup (merge restore of every namespace in it; see {@link adminRestoreBackup} for options). */
+  async restoreBackup(backupId: string): Promise<RestoreBackupResponse> {
+    return this.request<RestoreBackupResponse>('POST', '/v1/admin/backups/restore', { backup_id: backupId });
   }
 
   /** Delete a backup */
   async deleteBackup(backupId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/v1/admin/backups/${backupId}`);
+    return this.request<{ status: string }>('DELETE', `/v1/admin/backups/${encodeURIComponent(backupId)}`);
   }
 
   /** Get AutoPilot status: current config and last-run statistics (PILOT-1) */
@@ -2926,21 +3154,36 @@ export class DakeraClient {
   }
 
   /**
-   * Re-encrypt all memory content blobs with a new AES-256-GCM key (SEC-3).
+   * Rotate the encryption-at-rest data key (SEC-3,
+   * `POST /admin/encryption/rotate-key`, global Admin scope).
    *
-   * After this call the new key is active in the running process.
-   * The operator must update `DAKERA_ENCRYPTION_KEY` and restart to make the
-   * rotation durable across restarts. Requires Admin scope.
+   * Encryption at rest seals memory content, `_text`, the BM25 indexes and
+   * their delta logs, keyring records and backups created with
+   * `encrypt: true` — not embeddings, ids, tags, metadata or the other
+   * fields listed in the server documentation.
    *
-   * @param newKey - New passphrase or 64-char hex key.
-   * @param namespace - Rotate only this namespace. Omit to rotate all.
+   * Sends only `new_key`, `namespace` and `wait_secs`, and only when defined;
+   * the server refuses unknown fields with 422 (next server release: a
+   * misspelled `namespace` used to rotate the GLOBAL key). Any other field in
+   * a request object throws a `ValidationError` before sending.
+   *
+   * @param newKeyOrRequest - New passphrase or 64-char hex key, or the whole
+   *   request. Omitted / `undefined`: the server generates a random key.
+   * @param namespace - Rotate only this namespace. Omit to rotate the global key.
    */
   async rotateEncryptionKey(
-    newKey: string,
+    newKeyOrRequest?: string | RotateEncryptionKeyRequest,
     namespace?: string,
   ): Promise<RotateEncryptionKeyResponse> {
-    const body: RotateEncryptionKeyRequest = { new_key: newKey };
-    if (namespace !== undefined) body.namespace = namespace;
+    const request: RotateEncryptionKeyRequest =
+      typeof newKeyOrRequest === 'object' && newKeyOrRequest !== null
+        ? { ...newKeyOrRequest }
+        : { new_key: newKeyOrRequest };
+    if (namespace !== undefined) request.namespace = namespace;
+    const body = strictBody('POST /admin/encryption/rotate-key', request, ROTATE_ENCRYPTION_KEY_FIELDS, {
+      key: "Use 'new_key'.",
+      namespaces: "Use 'namespace' (one namespace) or omit it for the global key.",
+    });
     return this.request<RotateEncryptionKeyResponse>(
       'POST',
       '/v1/admin/encryption/rotate-key',
@@ -2952,9 +3195,32 @@ export class DakeraClient {
   // API Key Operations
   // ===========================================================================
 
-  /** Create a new API key */
+  /**
+   * Create a new API key (`POST /admin/keys`).
+   *
+   * Sends only `name`, `scope`, `namespaces` and `expires_in_days`, and only
+   * when defined (`namespaces: null` — every namespace — is sent as `null`).
+   * The server refuses unknown fields with 422 (next server release); this
+   * method throws a `ValidationError` for one before sending anything, so a
+   * misspelling (`namespace`, `expires_in`) can never mint a broader or
+   * non-expiring key, whatever the server version.
+   */
   async createKey(request: CreateKeyRequest): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', '/admin/keys', request);
+    const body = strictBody('POST /admin/keys', request, CREATE_KEY_FIELDS, {
+      permissions: "Use 'scope'.",
+      expires_at: "Use 'expires_in_days'.",
+      namespace: "Use 'namespaces' (an array).",
+      expires_in: "Use 'expires_in_days'.",
+    });
+    if (typeof body['scope'] !== 'string' || body['scope'] === '') {
+      throw new ValidationError(
+        "POST /admin/keys requires 'scope' (read, write, admin or super_admin)",
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    return this.request<ApiKey>('POST', '/admin/keys', body);
   }
 
   /** List all API keys */
@@ -2966,17 +3232,17 @@ export class DakeraClient {
 
   /** Get an API key by ID */
   async getKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('GET', `/admin/keys/${keyId}`);
+    return this.request<ApiKey>('GET', `/admin/keys/${encodeURIComponent(keyId)}`);
   }
 
   /** Delete an API key */
   async deleteKey(keyId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/admin/keys/${keyId}`);
+    return this.request<{ status: string }>('DELETE', `/admin/keys/${encodeURIComponent(keyId)}`);
   }
 
   /** Deactivate an API key */
   async deactivateKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', `/admin/keys/${keyId}/deactivate`);
+    return this.request<ApiKey>('POST', `/admin/keys/${encodeURIComponent(keyId)}/deactivate`);
   }
 
   /**
@@ -3006,7 +3272,7 @@ export class DakeraClient {
   async rotateKey(keyId: string, options?: RotateKeyOptions): Promise<RotateKeyResponse> {
     const body =
       options?.grace_secs !== undefined ? { grace_secs: options.grace_secs } : undefined;
-    return this.request<RotateKeyResponse>('POST', `/admin/keys/${keyId}/rotate`, body);
+    return this.request<RotateKeyResponse>('POST', `/admin/keys/${encodeURIComponent(keyId)}/rotate`, body);
   }
 
   /**
@@ -3021,7 +3287,7 @@ export class DakeraClient {
 
   /** Get usage statistics for an API key */
   async keyUsage(keyId: string): Promise<KeyUsage> {
-    return this.request<KeyUsage>('GET', `/admin/keys/${keyId}/usage`);
+    return this.request<KeyUsage>('GET', `/admin/keys/${encodeURIComponent(keyId)}/usage`);
   }
 
   // ===========================================================================
@@ -3146,6 +3412,13 @@ export class DakeraClient {
    * Return a URL with `?api_key=<key>` appended for use with browser-native
    * `EventSource`, which cannot send custom request headers.
    *
+   * @deprecated A key in a URL ends up in browser history, proxy and server
+   * access logs and `Referer` headers. The SDK's own streams
+   * ({@link streamNamespaceEvents}, {@link streamGlobalEvents},
+   * {@link streamMemoryEvents}, {@link streamAuditEvents}) send the key in the
+   * `Authorization` header and work in browsers too. In a browser, do not hold
+   * a key at all: put a proxy in front of Dakera that adds it server-side.
+   *
    * @example
    * ```ts
    * const src = new EventSource(client.sseUrl('/v1/namespaces/my-ns/events'));
@@ -3153,63 +3426,127 @@ export class DakeraClient {
    */
   sseUrl(path: string): string {
     const base = `${this.baseUrl}${path}`;
-    if (!this.apiKey) return base;
+    if (!this.#apiKey) return base;
     const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}api_key=${encodeURIComponent(this.apiKey)}`;
+    return `${base}${sep}api_key=${encodeURIComponent(this.#apiKey)}`;
   }
 
-  /** Low-level SSE streaming helper — parses the SSE wire format. */
-  private async *_streamSse(url: string): AsyncGenerator<DakeraEvent> {
-    // Append ?api_key= so the URL is compatible with browser-native EventSource
-    // (which cannot send custom headers). fetch() also accepts the header form,
-    // but the query-param form works for both transports.
-    const sseUrl = this.apiKey
-      ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.apiKey)}`
-      : url;
-    const headers: Record<string, string> = {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    };
+  /**
+   * Open a server-sent-events stream and yield its events (`event` name and
+   * joined `data`), parsed per the WHATWG SSE rules: LF, CRLF and CR line
+   * endings, a leading BOM, comments, one optional space after the colon,
+   * multi-line `data`. The key goes in the `Authorization` header (never the
+   * URL). The connection phase is bounded by the client timeout; an HTTP error
+   * is thrown as the matching `DakeraError`. An event larger than
+   * {@link MAX_SSE_EVENT_CHARS} fails the stream instead of growing the buffer
+   * without bound. Breaking out of the loop cancels the response body, which
+   * closes the connection.
+   */
+  private async *_sseEvents(url: string): AsyncGenerator<{ event?: string; data: string }> {
+    const controller = new AbortController();
+    const connectMs = Math.min(this.connectTimeout, this.timeout);
+    const timer = setTimeout(() => controller.abort(), connectMs);
+    const headers: Record<string, string> = { ...this.#headers };
+    delete headers['Content-Type'];
+    headers['Accept'] = 'text/event-stream';
+    headers['Cache-Control'] = 'no-cache';
 
-    const response = await fetch(sseUrl, { headers });
-    if (!response.ok || !response.body) {
-      throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new TimeoutError(`SSE connection timed out after ${connectMs}ms (${redactUrl(url)})`);
+      }
+      const reason = error instanceof Error ? `: ${error.message}` : '';
+      throw new ConnectionError(`Failed to connect to ${redactUrl(url)}${reason}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      // Throws the mapped DakeraError (401 → AuthenticationError, ...).
+      await this.handleResponse<unknown>(response);
+      throw new DakeraError(`SSE connection failed: HTTP ${response.status}`, response.status);
+    }
+    if (!response.body) {
+      throw new ConnectionError(`SSE response from ${redactUrl(url)} has no body`);
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let atStart = true;
+    let eventName: string | undefined;
+    let data: string[] = [];
+    let dataChars = 0;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
-        // SSE events are separated by a blank line (\n\n)
-        let boundary: number;
-        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const event = this._parseSseBlock(block);
-          if (event !== null) yield event;
+        if (atStart && buffer.length > 0) {
+          if (buffer.charCodeAt(0) === 0xfeff) buffer = buffer.slice(1);
+          atStart = false;
+        }
+        let idx: number;
+        while ((idx = buffer.search(/[\r\n]/)) !== -1) {
+          // A CR at the end of the buffer may be the first half of a CRLF.
+          if (buffer[idx] === '\r' && idx === buffer.length - 1) break;
+          const line = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + (buffer[idx] === '\r' && buffer[idx + 1] === '\n' ? 2 : 1));
+          if (line === '') {
+            if (data.length > 0) yield { event: eventName, data: data.join('\n') };
+            eventName = undefined;
+            data = [];
+            dataChars = 0;
+            continue;
+          }
+          if (line.startsWith(':')) continue; // comment / heartbeat
+          const colon = line.indexOf(':');
+          const field = colon === -1 ? line : line.slice(0, colon);
+          let fieldValue = colon === -1 ? '' : line.slice(colon + 1);
+          if (fieldValue.startsWith(' ')) fieldValue = fieldValue.slice(1);
+          if (field === 'data') {
+            data.push(fieldValue);
+            dataChars += fieldValue.length + 1;
+          } else if (field === 'event') {
+            eventName = fieldValue;
+          }
+          // `id` and `retry` are not used by Dakera streams.
+        }
+        if (buffer.length + dataChars > MAX_SSE_EVENT_CHARS) {
+          throw new DakeraError(
+            `SSE event larger than ${MAX_SSE_EVENT_CHARS} characters from ${redactUrl(url)}; stream closed`,
+          );
         }
       }
+      // End of stream: an event without its terminating blank line is
+      // discarded, as the SSE rules require.
     } finally {
-      reader.releaseLock();
+      try {
+        await reader.cancel();
+      } catch {
+        // already closed
+      }
     }
   }
 
-  /** Parse a single SSE event block into a {@link DakeraEvent}. */
-  private _parseSseBlock(block: string): DakeraEvent | null {
-    const dataLines: string[] = [];
-    for (const line of block.split('\n')) {
-      if (line.startsWith(':')) continue; // SSE comment / heartbeat
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  /** Low-level SSE helper: `data` parsed as JSON; frames that are not JSON objects are skipped. */
+  private async *_streamSse(url: string): AsyncGenerator<DakeraEvent> {
+    for await (const frame of this._sseEvents(url)) {
+      const event = this._parseSseData(frame.data);
+      if (event !== null) yield event as unknown as DakeraEvent;
     }
-    if (dataLines.length === 0) return null;
+  }
+
+  /** JSON object of an SSE `data` field, or `null` (not JSON, or not an object). */
+  private _parseSseData(data: string): Record<string, unknown> | null {
     try {
-      return JSON.parse(dataLines.join('\n')) as DakeraEvent;
+      const parsed = safeJsonParse(data);
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
     } catch {
       return null;
     }
@@ -3223,66 +3560,15 @@ export class DakeraClient {
    * so callers receive a fully-populated {@link MemoryEvent}.
    */
   private async *_streamSseMemory(url: string): AsyncGenerator<MemoryEvent> {
-    const sseUrl = this.apiKey
-      ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.apiKey)}`
-      : url;
-    const headers: Record<string, string> = {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    };
-
-    const response = await fetch(sseUrl, { headers });
-    if (!response.ok || !response.body) {
-      throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let boundary: number;
-        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const event = this._parseSseMemoryBlock(block);
-          if (event !== null) yield event;
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  /** Parse a single SSE event block into a {@link MemoryEvent}. */
-  private _parseSseMemoryBlock(block: string): MemoryEvent | null {
-    let eventType: string | undefined;
-    const dataLines: string[] = [];
-
-    for (const line of block.split('\n')) {
-      if (line.startsWith(':')) continue; // SSE comment / heartbeat
-      if (line.startsWith('event:')) {
-        eventType = line.slice(6).trim();
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trimStart());
-      }
-    }
-
-    if (dataLines.length === 0) return null;
-
-    try {
-      const raw = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+    for await (const frame of this._sseEvents(url)) {
+      const raw = this._parseSseData(frame.data);
+      if (raw === null) continue;
       // Build a MemoryEvent, normalising the connected handshake event which
       // uses {"type":"connected","timestamp":...} instead of the normal shape.
       const parsed = raw as unknown as MemoryEvent;
       // Ensure event_type is populated — prefer the SSE event: field when set.
-      if (eventType && !parsed.event_type) {
-        parsed.event_type = eventType;
+      if (frame.event && !parsed.event_type) {
+        parsed.event_type = frame.event;
       }
       // connected event uses "type" key; fall back to it if event_type still unset.
       if (!parsed.event_type && typeof raw['type'] === 'string') {
@@ -3292,9 +3578,7 @@ export class DakeraClient {
       if (parsed.agent_id === undefined) {
         parsed.agent_id = '';
       }
-      return parsed;
-    } catch {
-      return null;
+      yield parsed;
     }
   }
 
@@ -3310,25 +3594,31 @@ export class DakeraClient {
    * @param namespace     The namespace to scope this key to.
    * @param name          Human-readable label for the key.
    * @param expiresInDaysOrOptions Expiry in days from now, or options:
-   *   `scope` (at most `admin`), `extra_namespaces` (server v0.12.2+: may hold
+   *   `scope` (at most `admin`; default `read`, the least privilege — the
+   *   server requires a scope), `extra_namespaces` (server v0.12.2+: may hold
    *   prefix patterns, validated and contained in the caller's grants) and
-   *   `expires_in_days`. Undefined fields are not sent.
+   *   `expires_in_days`. Only these fields are sent, and only when defined;
+   *   any other option throws a `ValidationError` before sending (the server
+   *   answers 422 to an unknown field, next server release).
    */
   async createNamespaceKey(
     namespace: string,
     name: string,
     expiresInDaysOrOptions?: number | CreateNamespaceKeyOptions,
   ): Promise<CreateNamespaceKeyResponse> {
-    const body: Record<string, unknown> = { name };
-    if (typeof expiresInDaysOrOptions === 'number') {
-      body.expires_in_days = expiresInDaysOrOptions;
-    } else if (expiresInDaysOrOptions !== undefined) {
-      const o = expiresInDaysOrOptions;
-      if (o.scope !== undefined) body.scope = o.scope;
-      if (o.extra_namespaces !== undefined) body.extra_namespaces = o.extra_namespaces;
-      if (o.expires_in_days !== undefined) body.expires_in_days = o.expires_in_days;
-    }
-    return this.request<CreateNamespaceKeyResponse>('POST', `/v1/namespaces/${namespace}/keys`, body);
+    const options: CreateNamespaceKeyOptions =
+      typeof expiresInDaysOrOptions === 'number'
+        ? { expires_in_days: expiresInDaysOrOptions }
+        : (expiresInDaysOrOptions ?? {});
+    const body: Record<string, unknown> = {
+      name,
+      ...strictBody('POST /v1/namespaces/{ns}/keys', options, CREATE_NAMESPACE_KEY_OPTION_FIELDS, {
+        namespaces: "Use 'extra_namespaces'.",
+        expires_in: "Use 'expires_in_days'.",
+      }),
+    };
+    if (body['scope'] === undefined) body['scope'] = 'read';
+    return this.request<CreateNamespaceKeyResponse>('POST', `/v1/namespaces/${encodeURIComponent(namespace)}/keys`, body);
   }
 
   /**
@@ -3337,7 +3627,7 @@ export class DakeraClient {
    * @param namespace  The namespace whose keys to list.
    */
   async listNamespaceKeys(namespace: string): Promise<ListNamespaceKeysResponse> {
-    return this.request<ListNamespaceKeysResponse>('GET', `/v1/namespaces/${namespace}/keys`);
+    return this.request<ListNamespaceKeysResponse>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/keys`);
   }
 
   /**
@@ -3372,7 +3662,7 @@ export class DakeraClient {
    * @param keyId      The key to revoke.
    */
   async deleteNamespaceKey(namespace: string, keyId: string): Promise<{ success: boolean; message: string }> {
-    return this.request<{ success: boolean; message: string }>('DELETE', `/v1/namespaces/${namespace}/keys/${keyId}`);
+    return this.request<{ success: boolean; message: string }>('DELETE', `/v1/namespaces/${encodeURIComponent(namespace)}/keys/${encodeURIComponent(keyId)}`);
   }
 
   /**
@@ -3382,7 +3672,7 @@ export class DakeraClient {
    * @param keyId      The key whose usage to retrieve.
    */
   async getNamespaceKeyUsage(namespace: string, keyId: string): Promise<NamespaceKeyUsageResponse> {
-    return this.request<NamespaceKeyUsageResponse>('GET', `/v1/namespaces/${namespace}/keys/${keyId}/usage`);
+    return this.request<NamespaceKeyUsageResponse>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/keys/${encodeURIComponent(keyId)}/usage`);
   }
 
   // ===========================================================================
@@ -3478,7 +3768,14 @@ export class DakeraClient {
     if (opts?.eventType) params.set('event_type', opts.eventType);
     const qs = params.toString();
     const url = `${this.baseUrl}/v1/audit/stream${qs ? `?${qs}` : ''}`;
-    yield* this._streamSse(url);
+    // The server streams every event (it reads no query parameters), so the
+    // filters are applied here as well; the `connected` handshake always passes.
+    for await (const event of this._streamSseMemory(url)) {
+      const handshake = event.event_type === 'connected';
+      if (!handshake && opts?.agentId && event.agent_id !== opts.agentId) continue;
+      if (!handshake && opts?.eventType && event.event_type !== opts.eventType) continue;
+      yield event as unknown as DakeraEvent;
+    }
   }
 
   /**
@@ -3606,7 +3903,7 @@ export class DakeraClient {
     try {
       const resp = await fetch(`${this.odeUrl}/ode/extract`, {
         method: 'POST',
-        headers: { ...this.headers },
+        headers: { ...this.#headers },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -3737,22 +4034,22 @@ export class DakeraClient {
 
   /** GET /admin/quotas/{namespace} — get namespace quota. */
   async adminGetQuota(namespace: string): Promise<QuotaStatus> {
-    return this.request<QuotaStatus>('GET', `/v1/admin/quotas/${namespace}`);
+    return this.request<QuotaStatus>('GET', `/v1/admin/quotas/${encodeURIComponent(namespace)}`);
   }
 
   /** PUT /admin/quotas/{namespace} — set namespace quota. */
   async adminSetQuota(namespace: string, request: SetQuotaRequest): Promise<SetQuotaResponse> {
-    return this.request<SetQuotaResponse>('PUT', `/v1/admin/quotas/${namespace}`, request);
+    return this.request<SetQuotaResponse>('PUT', `/v1/admin/quotas/${encodeURIComponent(namespace)}`, request);
   }
 
   /** DELETE /admin/quotas/{namespace} — remove namespace quota. */
   async adminDeleteQuota(namespace: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/quotas/${namespace}`);
+    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/quotas/${encodeURIComponent(namespace)}`);
   }
 
   /** POST /admin/quotas/{namespace}/check — check if operation would exceed quota. */
   async adminCheckQuota(namespace: string, request: QuotaCheckRequest): Promise<QuotaCheckResult> {
-    return this.request<QuotaCheckResult>('POST', `/v1/admin/quotas/${namespace}/check`, request);
+    return this.request<QuotaCheckResult>('POST', `/v1/admin/quotas/${encodeURIComponent(namespace)}/check`, request);
   }
 
   // ---------------------------------------------------------------------------
@@ -3763,7 +4060,9 @@ export class DakeraClient {
   async adminListSlowQueries(params?: { namespace?: string; query_type?: string; limit?: number }): Promise<unknown[]> {
     const qs = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
     const path = qs ? `/v1/admin/slow-queries?${qs}` : '/v1/admin/slow-queries';
-    return this.request<unknown[]>('GET', path);
+    // The server answers `{queries, total, threshold_ms}`; return its entries.
+    const raw = await this.request<unknown[] | { queries?: unknown[] }>('GET', path);
+    return Array.isArray(raw) ? raw : (raw?.queries ?? []);
   }
 
   /** GET /admin/slow-queries/summary — slow query summary. */
@@ -3783,6 +4082,63 @@ export class DakeraClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Admin — namespaces, encryption at rest, re-embed migration
+  // ---------------------------------------------------------------------------
+
+  /**
+   * GET /admin/namespaces — every namespace with its stats (global Admin
+   * scope): `{namespaces, total, total_vectors, ...}`.
+   */
+  async adminListNamespaces(): Promise<AdminNamespaceList> {
+    return this.request<AdminNamespaceList>('GET', '/v1/admin/namespaces');
+  }
+
+  /**
+   * DELETE /admin/namespaces/{ns} — delete a namespace as an admin (Admin
+   * scope on it). Unlike {@link deleteNamespace} it also accepts internal
+   * `_dakera_*` namespaces.
+   */
+  async adminDeleteNamespace(namespace: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'DELETE',
+      `/v1/admin/namespaces/${encodeURIComponent(namespace)}`,
+    );
+  }
+
+  /** GET /admin/encryption/status — keyring and re-seal state of encryption at rest (global Admin). */
+  async adminEncryptionStatus(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/v1/admin/encryption/status');
+  }
+
+  /**
+   * POST /admin/encryption/reseal — run a re-seal pass now (global Admin).
+   * `namespace` limits it to one namespace; `wait_secs` (default 0, max 300)
+   * waits for the pass. Undefined fields are not sent. 400 when encryption at
+   * rest is not configured.
+   */
+  async adminResealEncryption(
+    request: { namespace?: string; wait_secs?: number } = {},
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = {};
+    if (request.namespace !== undefined) body['namespace'] = request.namespace;
+    if (request.wait_secs !== undefined) body['wait_secs'] = request.wait_secs;
+    return this.request<Record<string, unknown>>('POST', '/v1/admin/encryption/reseal', body);
+  }
+
+  /** POST /admin/encryption/keys/{key_id}/revoke-master — revoke a master key of the keyring (global Admin). */
+  async adminRevokeEncryptionMaster(keyId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'POST',
+      `/v1/admin/encryption/keys/${encodeURIComponent(keyId)}/revoke-master`,
+    );
+  }
+
+  /** GET /admin/reembed/migration — state of an embedding-model migration (Admin). */
+  async adminReembedMigrationStatus(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/v1/admin/reembed/migration');
+  }
+
+  // ---------------------------------------------------------------------------
   // Admin — Backups
   // ---------------------------------------------------------------------------
 
@@ -3791,19 +4147,32 @@ export class DakeraClient {
     return this.request<BackupListResponse>('GET', '/v1/admin/backups');
   }
 
-  /** POST /admin/backups — create a new backup. */
+  /**
+   * POST /admin/backups — create a new backup.
+   *
+   * Sends only `name`, `backup_type`, `namespaces`, `encrypt` and
+   * `compression`, and only when defined. The server refuses unknown fields
+   * with 422 (next server release: `encrypted` for `encrypt` used to write a
+   * plaintext backup in silence); any other field throws a `ValidationError`
+   * before sending.
+   */
   async adminCreateBackup(request: CreateBackupRequest): Promise<CreateBackupResponse> {
-    return this.request<CreateBackupResponse>('POST', '/v1/admin/backups', request);
+    const body = strictBody('POST /admin/backups', request, CREATE_BACKUP_FIELDS, {
+      encrypted: "Use 'encrypt'.",
+      include_data: 'The server has no such option.',
+      type: "Use 'backup_type'.",
+    });
+    return this.request<CreateBackupResponse>('POST', '/v1/admin/backups', body);
   }
 
   /** GET /admin/backups/{id} — get backup details. */
   async adminGetBackup(backupId: string): Promise<BackupInfo> {
-    return this.request<BackupInfo>('GET', `/v1/admin/backups/${backupId}`);
+    return this.request<BackupInfo>('GET', `/v1/admin/backups/${encodeURIComponent(backupId)}`);
   }
 
   /** DELETE /admin/backups/{id} — delete a backup. */
   async adminDeleteBackup(backupId: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/backups/${backupId}`);
+    return this.request<Record<string, unknown>>('DELETE', `/v1/admin/backups/${encodeURIComponent(backupId)}`);
   }
 
   /** GET /admin/backups/schedule — get backup schedule. */
@@ -3823,7 +4192,7 @@ export class DakeraClient {
 
   /** GET /admin/backups/restore/{id} — restore operation status. */
   async adminGetRestoreStatus(restoreId: string): Promise<RestoreBackupResponse> {
-    return this.request<RestoreBackupResponse>('GET', `/v1/admin/backups/restore/${restoreId}`);
+    return this.request<RestoreBackupResponse>('GET', `/v1/admin/backups/restore/${encodeURIComponent(restoreId)}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -3842,7 +4211,7 @@ export class DakeraClient {
 
   /** GET /ops/jobs/{id} — get job status. */
   async opsGetJob(jobId: string): Promise<JobInfo> {
-    return this.request<JobInfo>('GET', `/ops/jobs/${jobId}`);
+    return this.request<JobInfo>('GET', `/ops/jobs/${encodeURIComponent(jobId)}`);
   }
 
   /** POST /ops/compact — trigger compaction. */
@@ -3850,9 +4219,15 @@ export class DakeraClient {
     return this.request<CompactionResponse>('POST', '/ops/compact', request ?? {});
   }
 
-  /** POST /ops/shutdown — request graceful shutdown. */
+  /**
+   * POST /ops/shutdown — request a graceful shutdown of the node.
+   *
+   * Requires a global **super_admin** key (next server release; a global
+   * `admin` key gets 403 `AuthorizationError`): a shutdown stops the node for
+   * every tenant. Never retried.
+   */
   async opsShutdown(): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('POST', '/ops/shutdown');
+    return this.request<Record<string, unknown>>('POST', '/ops/shutdown', undefined, { retry: false });
   }
 
   // ────────────────────────────────────────────────────────────
@@ -3900,35 +4275,35 @@ export class DakeraClient {
     );
   }
 
-  /** GET /admin/backups/{id}/download — download a backup as binary data. */
+  /**
+   * GET /admin/backups/{id}/download — download a backup as binary data.
+   * Runs through the client's request path: timeout, safe retries and typed
+   * errors (`NotFoundError`, `AuthorizationError`, ...).
+   */
   async adminDownloadBackup(backupId: string): Promise<ArrayBuffer> {
-    const url = `${this.baseUrl}/v1/admin/backups/${encodeURIComponent(backupId)}/download`;
-    const response = await fetch(url, {
-      headers: { ...this.headers, Accept: 'application/octet-stream' },
-    });
-    if (!response.ok) {
-      throw new Error(`Download failed: ${response.status}`);
+    const res = await this.request<AttachmentDownload>(
+      'GET',
+      `/v1/admin/backups/${encodeURIComponent(backupId)}/download`,
+      undefined,
+      { asBytes: true, accept: 'application/octet-stream' },
+    );
+    const bytes = res.data;
+    if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+      return bytes.buffer as ArrayBuffer;
     }
-    return response.arrayBuffer();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   }
 
-  /** POST /admin/backups/upload — upload a backup archive. */
+  /**
+   * POST /admin/backups/upload — upload a backup archive (gzip). Sent with
+   * the client's headers and timeout; not retried after a timeout (it is not
+   * idempotent).
+   */
   async adminUploadBackup(data: ArrayBuffer | Uint8Array): Promise<CreateBackupResponse> {
-    const url = `${this.baseUrl}/v1/admin/backups/upload`;
-    const headers: Record<string, string> = {};
-    if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
-    }
-    headers['Content-Type'] = 'application/gzip';
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: data instanceof ArrayBuffer ? data : (data as unknown as BodyInit),
+    return this.request<CreateBackupResponse>('POST', '/v1/admin/backups/upload', undefined, {
+      rawBody: data as BodyInit,
+      contentType: 'application/gzip',
     });
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status}`);
-    }
-    return response.json() as Promise<CreateBackupResponse>;
   }
 
   /** GET /admin/storage/tiers — storage tier overview. */

@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Next Dakera server release support (Dakera-AI/dakera#917, #920) and an SDK security / robustness
+audit. Compatible with v0.12.x servers: the new request fields are left out when unset (older servers
+ignore them), the new response fields are optional.
+
+### Added
+
+- `recall()` options **`neighborhood_mode`** (`'inline' | 'separate' | 'off'`, `NeighborhoodMode`,
+  `NEIGHBORHOOD_MODES`, `isNeighborhoodMode()`) and **`include_summaries`**; an unknown mode throws a
+  `ValidationError` before sending. `recall()` takes a typed `MemoryRecallOptions` that also forwards
+  `session_id`, `importance_weighted`, `rerank_candidates`, `fusion`, `vector_weight`, `iterations` and
+  `neighborhood` (all snake_case, as on the wire; undefined fields are not sent).
+- `RecalledMemory.matched_text`, `matched_ids`, `retrieval` (`"neighborhood"` on inline context items)
+  and `context_of`; `RecallResponse.context_memories` (under `neighborhood_mode: "separate"`), plus the
+  server's `query_embedding_time_ms`, `search_time_ms`, `rerank` / `rerank_report` (`RerankReport`) and
+  `late_interaction_first_stage`, which `recall()` used to drop.
+- `searchMemories()` takes `SearchMemoriesOptions`: adds `session_id`, `max_importance`,
+  `created_after`, `created_before` and `sort_by`.
+- `adminListNamespaces()`, `adminDeleteNamespace()`, `adminEncryptionStatus()`,
+  `adminResealEncryption()`, `adminRevokeEncryptionMaster()`, `adminReembedMigrationStatus()`.
+- `rotateEncryptionKey()` accepts a request object with `wait_secs`, and no key (the server then
+  generates one); `RotateEncryptionKeyResponse` gains `key_id`, `scope`, `reseal`, `status_url`, ...
+- `createNamespace()` accepts `distance`.
+
+### Changed
+
+- **Strict admin request bodies.** `createKey()`, `createNamespaceKey()`, `adminCreateBackup()` and
+  `rotateEncryptionKey()` send only the fields the server accepts (a strict server answers 422 to any
+  other) and never an `undefined` one; another field throws a `ValidationError` before anything is
+  sent, naming the right field (`expires_at` → `expires_in_days`, `encrypted` → `encrypt`, ...).
+  `CreateKeyRequest.scope` is required (the server always required it) and its `permissions` /
+  `expires_at` fields are removed: no server ever read them (a key created with `expires_at` never
+  expired). `createNamespaceKey()` without a scope now sends `scope: "read"` (the server requires one;
+  the request used to fail with 422).
+- **Retries are made only when safe.** 429 and 503 are retried for every method, honouring
+  `Retry-After` (now also an HTTP-date, and capped at 60 s for 429 too); other 5xx, timeouts and network
+  errors only for idempotent requests (GET, HEAD, PUT, DELETE and read-only POSTs: recall, search,
+  query, batch recall, ...). A `storeMemory()` (or any other write) that times out or gets a 500 is no
+  longer sent again. `opsShutdown()` is never retried.
+- **Timeouts cover the response body.** The `AbortController` deadline used to stop once the headers
+  arrived; a stalled body now ends in a `TimeoutError` too. A success whose JSON does not parse throws a
+  `DakeraError` instead of returning `undefined`.
+- **SSE streams send the key in the `Authorization` header**, never as `?api_key=` in the URL, and
+  carry the client's custom headers. The parser follows the WHATWG rules (CRLF / CR line endings, BOM,
+  one optional space after the colon), drops an event without its terminating blank line, caps an event
+  at 1 MiB, cancels the response body when the caller breaks out of the loop (the connection used to stay
+  open), and throws typed errors (`AuthenticationError`, ...) for an HTTP error.
+  `streamAuditEvents()` applies its `agentId` / `eventType` filters itself (the server ignores them).
+- `adminDownloadBackup()` / `adminUploadBackup()` go through the client's request path: timeout,
+  custom headers and typed errors (`NotFoundError`, `PayloadTooLargeError`) instead of a plain `Error`.
+- `createBackup()` is deprecated in favour of `adminCreateBackup()`: it sent `include_data`, which no
+  server reads (a strict server refuses it); it now creates a named full backup and returns its
+  `BackupInfo`. `listBackups()` unwraps the server's `{backups, total}`; `restoreBackup()` returns
+  `RestoreBackupResponse`.
+- `slowQueries()` unwraps the server's `{queries, total, threshold_ms}`, sends `namespace` /
+  `queryType`, and applies `minDurationMs` locally (it is not a server parameter);
+  `adminListSlowQueries()` returns the entries too. `SlowQuery` follows the server's entry.
+- `createNamespace()` no longer sends `index_type` / `metadata` (not server fields).
+- `ChatMemorySession.recall()` asks for `neighborhood_mode: "separate"`, so `topK` is the maximum it
+  returns.
+- `sseUrl()` is deprecated: a key in a URL ends up in logs and browser history.
+
+### Fixed
+
+- `recall()` / `searchMemories()` results keep `vector_score` and `text_score` (they were dropped when
+  the server's nested result was flattened).
+- Path segments (namespace, agent, memory, session, key, backup and job ids) are percent-encoded
+  everywhere: `../` in a name can no longer reach another route.
+- `listNamespaces()` does not pick up an inherited value for a namespace named like an
+  `Object.prototype` member.
+
+### Security
+
+- The API key is held in ECMAScript private fields: it is not in `JSON.stringify(client)`,
+  `Object.keys(client)`, `String(client)` or `console.log(client)` (`toJSON()`, `toString()` and the
+  Node inspect hook show the base URL only, with user-info redacted). Error messages carry no key and
+  redact user-info and credential query parameters from URLs.
+- SSE payloads are parsed without `__proto__` keys; flattened results are built with object spread
+  (own data properties), so a server response cannot change a prototype.
+- README: keep keys out of browsers (use a server-side proxy), timeouts and retry policy.
+- Dev dependencies: `npm audit fix` updates brace-expansion 5.0.12 (GHSA-q2hr-2g5m-vwhr,
+  GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p), nanoid 3.3.20 (GHSA-2v37-7h3g-55p8) and source-map-js
+  1.2.2 (GHSA-68fv-2mgg-jv7q); `npm audit` reports 0 vulnerabilities. The published package has no
+  runtime dependencies.
+
 ## [0.12.2] - 2026-10-08
 
 Server v0.12.2 support (Dakera-AI/dakera#916). Compatible with v0.12.0 and v0.12.1 servers: new

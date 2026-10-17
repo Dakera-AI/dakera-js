@@ -89,7 +89,6 @@ describe('ChatMemorySession.store', () => {
   it('deduplicates role tag', async () => {
     await session.store('user', 'test', { tags: ['user', 'extra'] });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const call = (client.storeMemory as any).mock.calls[0][1];
     const userCount = (call.tags as string[]).filter((t: string) => t === 'user').length;
     expect(userCount).toBe(1);
@@ -115,7 +114,7 @@ describe('ChatMemorySession.recall', () => {
   it('calls recall with agent id and default top_k 5', async () => {
     const memories = await session.recall('user preferences');
 
-    expect(client.recall).toHaveBeenCalledWith('agent-1', 'user preferences', { top_k: 5 });
+    expect(client.recall).toHaveBeenCalledWith('agent-1', 'user preferences', { top_k: 5, neighborhood_mode: 'separate' });
     expect(memories).toHaveLength(1);
     expect(memories[0].content).toBe('Alice likes TypeScript');
   });
@@ -123,7 +122,7 @@ describe('ChatMemorySession.recall', () => {
   it('passes custom topK', async () => {
     await session.recall('something', { topK: 10 });
 
-    expect(client.recall).toHaveBeenCalledWith(expect.anything(), expect.anything(), { top_k: 10 });
+    expect(client.recall).toHaveBeenCalledWith(expect.anything(), expect.anything(), { top_k: 10, neighborhood_mode: 'separate' });
   });
 });
 

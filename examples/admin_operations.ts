@@ -56,16 +56,16 @@ async function main() {
 
   // --- Backups ---
   console.log('\n--- Backups ---');
-  const backup = await client.createBackup(true);
+  const { backup } = await client.adminCreateBackup({ name: `sdk-example-${Date.now()}` });
   if (!backup) { throw new Error('expected non-null backup'); }
-  console.log(`Created backup: ${backup.id} (size: ${backup.size_bytes ?? 'unknown'} bytes)`);
+  console.log(`Created backup: ${backup.backup_id} (size: ${backup.size_bytes ?? 'unknown'} bytes)`);
 
   const backups = await client.listBackups();
   console.log(`Total backups: ${backups.length}`);
 
   // Clean up: delete the backup we just created
-  await client.deleteBackup(backup.id);
-  console.log(`Deleted backup: ${backup.id}`);
+  await client.deleteBackup(backup.backup_id);
+  console.log(`Deleted backup: ${backup.backup_id}`);
 
   // --- Server Config ---
   console.log('\n--- Server Config ---');

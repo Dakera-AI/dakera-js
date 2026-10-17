@@ -116,11 +116,46 @@ for (const r of results) {
 ### SSE Streaming
 
 ```typescript
-// Subscribe to real-time memory events
-const stream = client.subscribeMemoryEvents('my-agent');
+// Subscribe to real-time memory events of one agent
+const stream = client.subscribeAgentMemories('my-agent');
 for await (const event of stream) {
-  console.log(event.type, event.memory_id);
+  console.log(event.event_type, event.memory_id);
 }
+```
+
+The streams send the key in the `Authorization` header (never in the URL) and close the connection when
+you `break` out of the loop.
+
+---
+
+## Next server release: recall and admin changes
+
+Additive; works unchanged against v0.12.x servers (they ignore the new request fields and send none of the
+new response fields, which are optional).
+
+- **`neighborhood_mode`** on `recall()` — `'inline' | 'separate' | 'off'` (omit = server default
+  `DAKERA_NEIGHBORHOOD_MODE`, default `inline`; `neighborhood: false` still means off and wins).
+  Under `inline`, neighbourhood context is appended to `memories` **after** the `top_k` ranked results, each
+  marked `retrieval: "neighborhood"` (its `score` is a raw similarity, not comparable). Use `separate` when
+  `top_k` must be the maximum: `memories.length <= top_k` and the context comes in `context_memories`, each
+  entry with `context_of` (the ranked memory it belongs to). `ChatMemorySession.recall()` asks for `separate`.
+- **`include_summaries`** on `recall()` — keep session summaries out of (or in) turn-level recall; omit for
+  the server default.
+- Results (`recall()` and `searchMemories()`) may carry **`matched_text`** / **`matched_ids`** when the
+  server collapses derived sentence sub-memories into their source (`DAKERA_RECALL_COLLAPSE_DERIVED`).
+- `RecallResponse` now also returns the server's `query_embedding_time_ms`, `search_time_ms`,
+  `rerank_report` and `late_interaction_first_stage`; `fusion` defaults to `minmax`, and the `rerank`
+  pool is 10x the ranking depth `max(top_k, 10)` on hybrid routing.
+- **Strict admin bodies** — `POST /admin/keys`, `POST /v1/namespaces/{ns}/keys`, `POST /admin/backups` and
+  `POST /admin/encryption/rotate-key` answer **422** to an unknown field. `createKey()`,
+  `createNamespaceKey()`, `adminCreateBackup()` and `rotateEncryptionKey()` send only the fields the server
+  knows, never `undefined` ones, and throw a `ValidationError` for any other field before sending.
+- **`opsShutdown()`** needs a global **super_admin** key (`admin` → 403).
+
+```typescript
+const res = await client.recall('my-agent', 'deploy port', { top_k: 5, neighborhood_mode: 'separate' });
+for (const m of res.memories) console.log(m.id, m.matched_text ?? m.content);
+for (const c of res.context_memories ?? []) console.log(`  context of ${c.context_of}:`, c.content);
 ```
 
 ---
@@ -256,13 +291,28 @@ const client = new DakeraClient({
   apiKey: 'your-key',
 });
 
-// With custom retry config
+// With custom retry config and timeout
 const client = new DakeraClient({
   baseUrl: 'http://localhost:3000',
   apiKey: 'your-key',
-  retryBackoff: { maxRetries: 5, baseDelayMs: 200, maxDelayMs: 10000 },
+  timeout: 10_000, // ms per attempt, response body included (default 30 000)
+  retryBackoff: { maxRetries: 5, baseDelay: 200, maxDelay: 10000 },
 });
 ```
+
+**Timeouts and retries.** Every attempt runs under an `AbortController` deadline (`timeout`, default 30 s)
+that covers the response body too, and ends in a `TimeoutError`. Only safe retries are made: `429` and `503`
+for every request (the server did not process it), honouring `Retry-After` (seconds or HTTP-date, capped at
+60 s); other `5xx`, timeouts and network errors only for idempotent requests (GET, HEAD, PUT, DELETE and
+read-only POSTs such as recall, search and query). A write such as `storeMemory()` that times out is not sent
+twice. Other `4xx` and `501` are never retried.
+
+**Keep API keys out of browsers.** A key in browser code is readable by anyone who can open the page. Call
+Dakera from your backend, or put a proxy in front of it that adds the key server-side (as the Dakera
+dashboard does) and construct the browser client without `apiKey`. The SDK sends the key only in the
+`Authorization` header; it is kept in a private field, so it is not in `JSON.stringify(client)`,
+`console.log(client)` or any error the SDK throws. `sseUrl()` (key in a `?api_key=` URL, for
+`EventSource`) is deprecated: URLs end up in logs and history.
 
 ---
 
