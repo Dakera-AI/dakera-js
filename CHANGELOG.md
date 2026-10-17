@@ -15,6 +15,20 @@ new response fields are optional; the new features need a v0.12.3+ server.
 
 ### Added
 
+- **Document import** (server v0.12.3+, Dakera-AI/dakera#923): `importDocument(agentId, request)`
+  (`POST /v1/memory/documents`: text, Markdown or HTML), `importAttachmentDocument(ns, ref, agentId,
+  request?)` (`POST /v1/namespaces/{ns}/attachments/{ref}/document`: PDF, DOCX, HTML, Markdown, text),
+  `getDocumentJob(agentId, jobId)`, `waitForDocumentJob(accepted, { intervalMs, timeoutMs, signal })`
+  (bounded, abortable; a failed job throws its status and code), `listDocuments(agentId, { cursor, limit })`,
+  `iterateDocuments()`, `getDocument()` and `deleteDocument()`. Types `ImportDocumentRequest`,
+  `ImportAttachmentDocumentRequest`, `DocumentImportCommon`, `ChunkingOptions`, `ChunkStrategy`,
+  `ImportDocumentAccepted`, `DocumentImportJob`, `DocumentChunkMeta`, `DocumentSummary`,
+  `DocumentListResponse`, `DocumentDetail`, `DocumentChunkInfo`, `DeleteDocumentResponse`; the
+  `documentChunkMeta(memory)` helper reads `_dakera_document` from a recalled memory;
+  `capabilities().documents` (`DocumentCapabilities`). Import requests are strict (unknown fields and
+  chunking options throw a `ValidationError` before sending); a pre-v0.12.3 server's 404 is reported as
+  "needs Dakera server v0.12.3+". The request helper accepts an `AbortSignal` internally.
+- `MemoryType` gains `working` (a server type the SDK did not list).
 - `recall()` options **`neighborhood_mode`** (`'inline' | 'separate' | 'off'`, `NeighborhoodMode`,
   `NEIGHBORHOOD_MODES`, `isNeighborhoodMode()`) and **`include_summaries`**; an unknown mode throws a
   `ValidationError` before sending. `recall()` takes a typed `MemoryRecallOptions` that also forwards

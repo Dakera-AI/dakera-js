@@ -161,6 +161,48 @@ for (const m of res.memories) console.log(m.id, m.matched_text ?? m.content);
 for (const c of res.context_memories ?? []) console.log(`  context of ${c.context_of}:`, c.content);
 ```
 
+### Document import (server v0.12.3+)
+
+A document (text, Markdown, HTML, or an uploaded PDF / DOCX / HTML / Markdown / text attachment) becomes a
+set of **chunk memories** of the agent, each with `_dakera_document` metadata (document, page range, heading
+path). Imports run as jobs. `capabilities().documents?.enabled` says whether the server has the routes; a
+server older than v0.12.3 answers them 404, which the SDK reports as "needs Dakera server v0.12.3+".
+
+```typescript
+import { documentChunkMeta } from '@dakera-ai/dakera';
+
+// Text / Markdown / HTML
+const accepted = await client.importDocument('docs-bot', {
+  content: markdown,
+  media_type: 'text/markdown',
+  tags: ['manual'],
+  chunking: { max_tokens: 300, strategy: 'structure' }, // optional
+});
+// Bounded wait; pass an AbortSignal to stop it early
+const job = await client.waitForDocumentJob(accepted, { timeoutMs: 120_000, signal });
+
+// PDF / DOCX: upload, then import
+const { attachment_ref } = await client.uploadAttachment('library', pdfBytes, 'application/pdf');
+await client.importAttachmentDocument('library', attachment_ref, 'docs-bot', { document_id: 'manual-v3' });
+
+// Cite the source of a recalled chunk
+for (const m of (await client.recall('docs-bot', 'install on linux')).memories) {
+  const doc = documentChunkMeta(m);
+  if (doc) console.log(doc.title, doc.page_start, doc.heading_path.join(' › '));
+}
+
+// Manage documents
+const page = await client.listDocuments('docs-bot', { limit: 50 }); // page.next_cursor → cursor
+const detail = await client.getDocument('docs-bot', 'manual-v3');  // the document and its chunks
+await client.deleteDocument('docs-bot', 'manual-v3');               // every chunk
+```
+
+Request objects are strict: only the server's fields are sent (`content`, `media_type`, `title`,
+`document_id`, the memory fields `memory_type`, `session_id`, `importance`, `tags`, `metadata`, `ttl_seconds`,
+`expires_at`, `lang`, plus `chunking: {max_tokens, overlap_tokens, strategy}` and `decompose`), and any other
+field throws a `ValidationError` before sending. A failed job throws a `DakeraError` with the job's status and
+code (413 too big / too many chunks, 422 `UNPROCESSABLE_CONTENT`, 504 `EXTRACTION_TIMEOUT`).
+
 ---
 
 ## What's new for Dakera server v0.12.2

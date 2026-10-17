@@ -96,6 +96,32 @@ export interface VisionCapabilities {
   raw: Record<string, unknown>;
 }
 
+/**
+ * Document import (`capabilities.documents`, server v0.12.3+): whether the
+ * `/v1/memory/documents` routes answer and what they accept.
+ */
+export interface DocumentCapabilities {
+  /** Whether the document routes answer (`DAKERA_DOCUMENTS`, default on). */
+  enabled: boolean;
+  /** Media types `POST /v1/memory/documents` takes as text. */
+  text_media_types: string[];
+  /** Media types an attachment may have to be imported as a document. */
+  media_types: string[];
+  /** Bytes one document may have (`DAKERA_DOCUMENT_MAX_BYTES`). */
+  max_bytes: number;
+  /** Bytes of text one extraction may produce (`DAKERA_DOCUMENT_MAX_TEXT_BYTES`). */
+  max_text_bytes: number;
+  /** Chunks one document may become (`DAKERA_DOCUMENT_MAX_CHUNKS`). */
+  max_chunks: number;
+  /** Default token budget of a chunk's text, before the model cap. */
+  default_chunk_tokens: number;
+  /** Default overlap between chunks, in tokens. */
+  default_overlap_tokens: number;
+  /** `chunking.strategy` values (`structure`, `fixed`). */
+  strategies: string[];
+  raw: Record<string, unknown>;
+}
+
 /** Key and grant surface (`capabilities.auth`, server v0.12.2+). */
 export interface AuthCapabilities {
   /** Key grants accept prefix patterns `p*`. */
@@ -175,6 +201,11 @@ export interface ServerCapabilities {
   naming?: NamingCapabilities;
   /** v0.12.2 (`capabilities_version` 2): session idle timeout and touch. Undefined on older servers. */
   sessions?: SessionCapabilities;
+  /**
+   * v0.12.3: document import. Undefined on older servers, whose document
+   * routes answer 404: check `documents?.enabled` before importing.
+   */
+  documents?: DocumentCapabilities;
   /** The verbatim document. */
   raw: Record<string, unknown>;
 }
@@ -349,6 +380,22 @@ function parseSessions(raw: unknown): SessionCapabilities | undefined {
   };
 }
 
+function parseDocuments(raw: unknown): DocumentCapabilities | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    enabled: raw.enabled === true,
+    text_media_types: stringList(raw.text_media_types),
+    media_types: stringList(raw.media_types),
+    max_bytes: integer(raw.max_bytes),
+    max_text_bytes: integer(raw.max_text_bytes),
+    max_chunks: integer(raw.max_chunks),
+    default_chunk_tokens: integer(raw.default_chunk_tokens),
+    default_overlap_tokens: integer(raw.default_overlap_tokens),
+    strategies: stringList(raw.strategies),
+    raw,
+  };
+}
+
 /**
  * Runtime guard for a capabilities document: tolerates unknown fields, unknown
  * strings inside lists, missing fields and non-object input (→ empty document).
@@ -379,6 +426,7 @@ export function parseCapabilities(raw: unknown): ServerCapabilities {
     ...optional('auth', parseAuth(doc.auth)),
     ...optional('naming', parseNaming(doc.naming)),
     ...optional('sessions', parseSessions(doc.sessions)),
+    ...optional('documents', parseDocuments(doc.documents)),
     raw: doc,
   };
 }

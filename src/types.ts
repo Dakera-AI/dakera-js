@@ -682,8 +682,12 @@ export interface ConfigureNamespaceResponse {
 // Memory Types
 // =============================================================================
 
-/** Memory type classification */
-export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'strategic';
+/**
+ * Memory type classification. The server knows `episodic` (its default),
+ * `semantic`, `procedural` and `working`; `strategic` is kept for source
+ * compatibility but the server refuses it.
+ */
+export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'working' | 'strategic';
 
 /** Request to store a memory */
 export interface StoreMemoryRequest {
@@ -4225,4 +4229,324 @@ export interface DrainDerivationsResponse {
   graph_queued: number;
   /** The status after the drain. */
   status: DerivationStatus;
+}
+
+// =============================================================================
+// Document import (server v0.12.3+, Dakera-AI/dakera#923)
+// =============================================================================
+
+/** User-metadata key every document chunk memory carries ({@link DocumentChunkMeta}). */
+export const DOCUMENT_META_KEY = '_dakera_document';
+
+/** Prefix of the tag every chunk of a document carries: `document:<document_id>`. */
+export const DOCUMENT_TAG_PREFIX = 'document:';
+
+/** Media types `POST /v1/memory/documents` accepts as text (`text/plain` is the default). */
+export type DocumentTextMediaType = 'text/plain' | 'text/markdown' | 'text/html';
+
+/** Every {@link DocumentTextMediaType}. */
+export const DOCUMENT_TEXT_MEDIA_TYPES: readonly DocumentTextMediaType[] = [
+  'text/plain',
+  'text/markdown',
+  'text/html',
+];
+
+/**
+ * How the extracted text is split: `structure` (default: sections at
+ * headings, then paragraphs, sentences, words) or `fixed` (plain token
+ * windows with overlap; headings are text).
+ */
+export type ChunkStrategy = 'structure' | 'fixed';
+
+/**
+ * The `chunking` field of an import request. The server refuses any other
+ * field with 422 (`deny_unknown_fields`); the SDK refuses it before sending.
+ */
+export interface ChunkingOptions {
+  /**
+   * Token budget of one chunk's text (default `DAKERA_DOCUMENT_CHUNK_TOKENS`,
+   * 400), clamped to the embedding model's token cap.
+   */
+  max_tokens?: number;
+  /**
+   * Tokens repeated from the end of the previous chunk (default
+   * `DAKERA_DOCUMENT_CHUNK_OVERLAP_TOKENS`, 50; at most a quarter of the budget).
+   */
+  overlap_tokens?: number;
+  /** `structure` (default) or `fixed`. */
+  strategy?: ChunkStrategy;
+}
+
+/**
+ * Fields both import requests share: what every chunk memory carries (as on
+ * `POST /v1/memory/store`), the chunking options and `decompose`. Undefined
+ * fields are not sent (the server defaults apply).
+ */
+export interface DocumentImportCommon {
+  /** Memory type of every chunk (server default `episodic`). */
+  memory_type?: MemoryType;
+  /** Session every chunk belongs to. */
+  session_id?: string;
+  /** Importance of every chunk, 0–1 (server default 0.5). */
+  importance?: number;
+  /** Tags of every chunk; the server adds `document:<document_id>`. */
+  tags?: string[];
+  /** User metadata of every chunk; the server adds `_dakera_document`. */
+  metadata?: Record<string, unknown>;
+  /** Time to live of every chunk, in seconds. */
+  ttl_seconds?: number;
+  /** Expiry of every chunk (unix seconds). */
+  expires_at?: number;
+  /** Language of the document for the write-time derivations. */
+  lang?: string;
+  /** Chunking options ({@link ChunkingOptions}). */
+  chunking?: ChunkingOptions;
+  /**
+   * Derive CE-31 sentence sub-memories from every chunk (default `false`: a
+   * chunk is already a retrieval unit, and up to 16 sentences per chunk would
+   * multiply the index up to 17-fold).
+   */
+  decompose?: boolean;
+}
+
+/**
+ * Body of `POST /v1/memory/documents` (without `agent_id`, which is the
+ * method's first argument): a document given as text.
+ */
+export interface ImportDocumentRequest extends DocumentImportCommon {
+  /** The document itself (at most `DAKERA_DOCUMENT_MAX_BYTES` bytes, default 25 MiB). */
+  content: string;
+  /** `text/plain` (default), `text/markdown` or `text/html`. */
+  media_type?: DocumentTextMediaType;
+  /**
+   * Title (else taken from the document: Markdown front matter or first `#`
+   * heading, HTML `<title>`). The root of every chunk's breadcrumb.
+   */
+  title?: string;
+  /**
+   * Document id. Default: derived from the agent and the content's SHA-256,
+   * so importing the same bytes again replaces the document with itself.
+   */
+  document_id?: string;
+}
+
+/**
+ * Body of `POST /v1/namespaces/{ns}/attachments/{ref}/document` (without
+ * `agent_id`). The format comes from the attachment's stored media type: PDF,
+ * DOCX, HTML, Markdown or text.
+ */
+export interface ImportAttachmentDocumentRequest extends DocumentImportCommon {
+  /** Title (else taken from the document: PDF `Title`, DOCX `dc:title`, ...). */
+  title?: string;
+  /** Document id. Default: derived from the agent and the attachment's content hash. */
+  document_id?: string;
+}
+
+/** `202` answer of both import routes. */
+export interface ImportDocumentAccepted {
+  job_id: string;
+  document_id: string;
+  agent_id: string;
+  /** Route to poll for the job (`GET`, a key that may read the agent). */
+  status_url: string;
+}
+
+/** State of a document import job. */
+export type DocumentJobStatus = 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
+
+/**
+ * A document import job (`GET /v1/memory/documents/jobs/{job_id}`), the
+ * server's job record.
+ */
+export interface DocumentImportJob {
+  id: string;
+  /** `document_import`. */
+  job_type: string;
+  status: DocumentJobStatus;
+  /** Unix seconds. */
+  created_at: number;
+  started_at?: number | null;
+  completed_at?: number | null;
+  /** 0–100. */
+  progress: number;
+  /**
+   * Progress (`chunks_stored n/total`) or, when completed, what the import did
+   * (`document imported: N chunks (W written, U unchanged, S stale removed)`).
+   */
+  message?: string | null;
+  /**
+   * `namespace`, `agent_id`, `document_id`, and for an attachment import
+   * `source_namespace` and `attachment_ref`.
+   */
+  metadata: Record<string, string>;
+  /**
+   * Why a `Failed` job failed: the HTTP status and error code the request
+   * would have answered (413 too big / too many chunks, 422
+   * `UNPROCESSABLE_CONTENT`, 504 `EXTRACTION_TIMEOUT`, ...).
+   */
+  error?: { status: number; code: string };
+}
+
+/**
+ * What `_dakera_document` holds on every chunk memory. The document-level
+ * fields are repeated on every chunk, so one chunk describes its document.
+ */
+export interface DocumentChunkMeta {
+  /** The document id. */
+  id: string;
+  title?: string;
+  media_type: string;
+  /** Position of this chunk, from 0. */
+  chunk_index: number;
+  /** Chunks of the document. */
+  chunk_count: number;
+  /** First page the chunk's text comes from (PDF; form-feed pages of plain text). */
+  page_start?: number;
+  /** Last page the chunk's text comes from. */
+  page_end?: number;
+  /** Headings above the chunk, outermost first (the title included). */
+  heading_path: string[];
+  /** Character range of the chunk's text in the extracted text. */
+  char_start: number;
+  char_end: number;
+  /** SHA-256 (hex) of the source document's bytes. */
+  sha256: string;
+  /** Bytes of the source document. */
+  bytes: number;
+  /** Pages of the source document, when it has pages. */
+  pages?: number;
+  /** When the document was first imported (unix seconds). */
+  created_at: number;
+  /** When the document was last imported (unix seconds). */
+  updated_at: number;
+  /** Whether CE-31 sentence sub-memories are derived from this chunk (absent = false). */
+  decompose?: boolean;
+  /** Hash of everything the chunk memory was written from. */
+  fingerprint?: string;
+}
+
+/** One document of `GET /v1/memory/documents`. */
+export interface DocumentSummary {
+  document_id: string;
+  title?: string;
+  media_type: string;
+  chunk_count: number;
+  bytes: number;
+  pages?: number;
+  /** Unix seconds. */
+  created_at: number;
+  /** Unix seconds. */
+  updated_at: number;
+  sha256: string;
+  /** The attachment the document was imported from. */
+  attachment_ref?: string;
+}
+
+/** `GET /v1/memory/documents` answer. */
+export interface DocumentListResponse {
+  /** Sorted by document id. */
+  documents: DocumentSummary[];
+  /** Pass as `cursor` for the next page; absent on the last one. */
+  next_cursor?: string;
+}
+
+/** Options of {@link DakeraClient.listDocuments}. */
+export interface ListDocumentsOptions {
+  /** The `next_cursor` of the previous page. */
+  cursor?: string;
+  /** Page size, 1–500 (server default 50). */
+  limit?: number;
+}
+
+/** One chunk of `GET /v1/memory/documents/{id}`. */
+export interface DocumentChunkInfo {
+  /** The chunk's memory id (`doc_<hash>`). */
+  id: string;
+  chunk_index: number;
+  page_start?: number;
+  page_end?: number;
+  heading_path: string[];
+  char_start: number;
+  char_end: number;
+}
+
+/** `GET /v1/memory/documents/{id}` answer: one document and its chunks. */
+export interface DocumentDetail {
+  document: DocumentSummary;
+  chunks: DocumentChunkInfo[];
+}
+
+/** `DELETE /v1/memory/documents/{id}` answer. */
+export interface DeleteDocumentResponse {
+  document_id: string;
+  /** Chunk memories removed. */
+  deleted_chunks: number;
+}
+
+/** Options of {@link DakeraClient.waitForDocumentJob}. */
+export interface WaitForDocumentJobOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms with a `TimeoutError` (default 600000). */
+  timeoutMs?: number;
+  /** Stop waiting (and abort the poll in flight) when this signal aborts. */
+  signal?: AbortSignal;
+}
+
+/**
+ * The `_dakera_document` metadata of a memory (a recall or search result, a
+ * listed or fetched memory) when it is a document chunk; `undefined`
+ * otherwise, or when the value does not have the chunk shape. Only own
+ * properties are read.
+ *
+ * @example
+ * ```ts
+ * for (const m of (await client.recall('docs-bot', 'install on linux')).memories) {
+ *   const doc = documentChunkMeta(m);
+ *   if (doc) console.log(`${doc.title} p.${doc.page_start ?? '-'} › ${doc.heading_path.join(' › ')}`);
+ * }
+ * ```
+ */
+export function documentChunkMeta(
+  memory: { metadata?: Record<string, unknown> | null } | null | undefined,
+): DocumentChunkMeta | undefined {
+  const metadata = memory?.metadata;
+  if (metadata === null || typeof metadata !== 'object') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(metadata, DOCUMENT_META_KEY)) return undefined;
+  const raw = (metadata as Record<string, unknown>)[DOCUMENT_META_KEY];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const m = raw as Record<string, unknown>;
+  const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  if (
+    typeof m.id !== 'string' ||
+    typeof m.media_type !== 'string' ||
+    !isNum(m.chunk_index) ||
+    !isNum(m.chunk_count) ||
+    !isNum(m.char_start) ||
+    !isNum(m.char_end)
+  ) {
+    return undefined;
+  }
+  const meta: DocumentChunkMeta = {
+    id: m.id,
+    media_type: m.media_type,
+    chunk_index: m.chunk_index,
+    chunk_count: m.chunk_count,
+    heading_path: Array.isArray(m.heading_path)
+      ? m.heading_path.filter((h): h is string => typeof h === 'string')
+      : [],
+    char_start: m.char_start,
+    char_end: m.char_end,
+    sha256: typeof m.sha256 === 'string' ? m.sha256 : '',
+    bytes: isNum(m.bytes) ? m.bytes : 0,
+    created_at: isNum(m.created_at) ? m.created_at : 0,
+    updated_at: isNum(m.updated_at) ? m.updated_at : 0,
+  };
+  if (typeof m.title === 'string') meta.title = m.title;
+  if (isNum(m.page_start)) meta.page_start = m.page_start;
+  if (isNum(m.page_end)) meta.page_end = m.page_end;
+  if (isNum(m.pages)) meta.pages = m.pages;
+  if (typeof m.decompose === 'boolean') meta.decompose = m.decompose;
+  if (typeof m.fingerprint === 'string') meta.fingerprint = m.fingerprint;
+  return meta;
 }

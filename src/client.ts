@@ -172,12 +172,58 @@ function safeJsonParse(text: string): unknown {
   return JSON.parse(text, (key, value) => (key === '__proto__' ? undefined : value));
 }
 
+/** What an aborted caller signal rejects with: its reason, or an `AbortError`. */
+function abortReason(signal: AbortSignal): unknown {
+  if (signal.reason !== undefined) return signal.reason;
+  const err = new Error('The operation was aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+/**
+ * Document import routes exist from server v0.12.3; an older server answers
+ * them 404 `ROUTE_NOT_FOUND`. Say so instead of a bare "not found".
+ */
+function documentsRouteError(error: unknown): unknown {
+  if (error instanceof NotFoundError && error.code === ErrorCode.ROUTE_NOT_FOUND) {
+    const err = new NotFoundError(
+      `Document import needs Dakera server v0.12.3+ (this server has no such route: ${error.message})`,
+      error.statusCode,
+      error.responseBody,
+      error.code,
+    );
+    err.details = error.details;
+    return err;
+  }
+  return error;
+}
+
+/** Fields of `DocumentImportCommon`. */
+const DOCUMENT_COMMON_FIELDS = [
+  'memory_type', 'session_id', 'importance', 'tags', 'metadata', 'ttl_seconds', 'expires_at',
+  'lang', 'chunking', 'decompose',
+] as const;
+const IMPORT_DOCUMENT_FIELDS = ['content', 'media_type', 'title', 'document_id', ...DOCUMENT_COMMON_FIELDS] as const;
+const IMPORT_ATTACHMENT_DOCUMENT_FIELDS = ['title', 'document_id', ...DOCUMENT_COMMON_FIELDS] as const;
+/** `ChunkingOptions` is `deny_unknown_fields` on the server (422). */
+const CHUNKING_FIELDS = ['max_tokens', 'overlap_tokens', 'strategy'] as const;
+
 /** Longest SSE event (bytes of text) the stream parser buffers before failing. */
 const MAX_SSE_EVENT_CHARS = 1024 * 1024;
 
 import type {
   MemoryRecallOptions,
   SearchMemoriesOptions,
+  DeleteDocumentResponse,
+  DocumentDetail,
+  DocumentImportJob,
+  DocumentListResponse,
+  DocumentSummary,
+  ImportAttachmentDocumentRequest,
+  ImportDocumentAccepted,
+  ImportDocumentRequest,
+  ListDocumentsOptions,
+  WaitForDocumentJobOptions,
   AdminNamespaceList,
   AdminConfig,
   AgentMemoriesOptions,
@@ -628,7 +674,15 @@ export class DakeraClient {
     method: string,
     path: string,
     body?: unknown,
-    opts?: { retry?: boolean; rawBody?: BodyInit; contentType?: string; asBytes?: boolean; accept?: string }
+    opts?: {
+      retry?: boolean;
+      rawBody?: BodyInit;
+      contentType?: string;
+      asBytes?: boolean;
+      accept?: string;
+      /** Caller's signal: aborting it aborts the attempt and stops retrying (its reason is thrown). */
+      signal?: AbortSignal;
+    }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const maxAttempts = opts?.retry === false ? 1 : Math.max(1, this.retryConfig.maxRetries);
@@ -637,10 +691,14 @@ export class DakeraClient {
     const attemptMs = Math.min(this.connectTimeout, this.timeout);
     let lastError: Error | undefined;
 
+    const callerSignal = opts?.signal;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const isLast = attempt === maxAttempts - 1;
+      if (callerSignal?.aborted) throw abortReason(callerSignal);
       const controller = new AbortController();
       const timerId = setTimeout(() => controller.abort(), attemptMs);
+      const onCallerAbort = () => controller.abort();
+      callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
       try {
         const headers: Record<string, string> = { ...this.#headers };
         if (opts?.contentType) headers['Content-Type'] = opts.contentType;
@@ -654,6 +712,7 @@ export class DakeraClient {
         // The body is read under the same deadline.
         return await this.handleResponse<T>(response, opts?.asBytes);
       } catch (error) {
+        if (callerSignal?.aborted) throw abortReason(callerSignal);
         if (error instanceof DakeraError && error.statusCode !== undefined) {
           const status = error.statusCode;
           // 429 / 503: refused before processing — safe to repeat for any method.
@@ -688,6 +747,7 @@ export class DakeraClient {
         await this.sleep(this.computeBackoff(attempt));
       } finally {
         clearTimeout(timerId);
+        callerSignal?.removeEventListener('abort', onCallerAbort);
       }
     }
 
@@ -2168,6 +2228,229 @@ export class DakeraClient {
       }
       await this.sleep(intervalMs);
     }
+  }
+
+  // ===========================================================================
+  // Document import (server v0.12.3+, Dakera-AI/dakera#923)
+  //
+  // A document becomes a set of chunk memories of the agent (`_dakera_agent_{id}`),
+  // each with `_dakera_document` metadata (read it with `documentChunkMeta()`).
+  // `capabilities().documents` says whether the routes are on (`DAKERA_DOCUMENTS`);
+  // a server older than v0.12.3 answers them 404, which these methods report as
+  // such. Errors: 501 FEATURE_DISABLED (off), 413 (too big), 503 + Retry-After
+  // (admission, retried), 429 (stores_per_minute).
+  // ===========================================================================
+
+  /** Build an import body from the request's known fields (others throw before sending). */
+  private documentImportBody(
+    route: string,
+    agentId: string,
+    request: object,
+    allowed: readonly string[],
+  ): Record<string, unknown> {
+    const fields = strictBody(route, request, allowed, {
+      chunk_size: "Use 'chunking: { max_tokens }'.",
+      chunk_tokens: "Use 'chunking: { max_tokens }'.",
+      content_type: "Use 'media_type'.",
+      agent_id: 'agent_id is the first argument.',
+    });
+    if (fields['chunking'] !== undefined && fields['chunking'] !== null) {
+      fields['chunking'] = strictBody(`${route} chunking`, fields['chunking'] as object, CHUNKING_FIELDS, {
+        size: "Use 'max_tokens'.",
+        overlap: "Use 'overlap_tokens'.",
+      });
+    }
+    return { agent_id: agentId, ...fields };
+  }
+
+  /**
+   * Import a document given as text (`POST /v1/memory/documents`, Write scope
+   * on the agent): `text/plain` (default), `text/markdown` or `text/html`.
+   * Answers `202` with the job to poll ({@link waitForDocumentJob}).
+   *
+   * Only the request's known fields are sent, never `undefined` ones; an
+   * unknown field (or chunking option) throws a `ValidationError` first.
+   *
+   * @example
+   * ```ts
+   * const accepted = await client.importDocument('docs-bot', {
+   *   content: markdown,
+   *   media_type: 'text/markdown',
+   *   chunking: { max_tokens: 300 },
+   * });
+   * const job = await client.waitForDocumentJob(accepted, { timeoutMs: 120_000 });
+   * ```
+   */
+  async importDocument(agentId: string, request: ImportDocumentRequest): Promise<ImportDocumentAccepted> {
+    const body = this.documentImportBody('POST /v1/memory/documents', agentId, request, IMPORT_DOCUMENT_FIELDS);
+    try {
+      return await this.request<ImportDocumentAccepted>('POST', '/v1/memory/documents', body);
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /**
+   * Import an uploaded attachment as a document
+   * (`POST /v1/namespaces/{ns}/attachments/{ref}/document`; Read on `ns`,
+   * Write on the agent; needs `DAKERA_ATTACHMENTS`). The format comes from the
+   * attachment's stored media type: PDF, DOCX, HTML, Markdown or text. Upload
+   * first with {@link uploadAttachment}. Answers `202` with the job.
+   */
+  async importAttachmentDocument(
+    namespace: string,
+    attachmentRef: string,
+    agentId: string,
+    request: ImportAttachmentDocumentRequest = {},
+  ): Promise<ImportDocumentAccepted> {
+    const route = 'POST /v1/namespaces/{ns}/attachments/{ref}/document';
+    const body = this.documentImportBody(route, agentId, request, IMPORT_ATTACHMENT_DOCUMENT_FIELDS);
+    try {
+      return await this.request<ImportDocumentAccepted>(
+        'POST',
+        `${this.attachmentsPath(namespace)}/${encodeURIComponent(attachmentRef)}/document`,
+        body,
+      );
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /**
+   * A document import job (`GET /v1/memory/documents/jobs/{job_id}?agent_id=`,
+   * Read scope). Jobs live in server memory: after a restart this is a 404
+   * `JOB_NOT_FOUND`; list the agent's documents instead.
+   */
+  async getDocumentJob(
+    agentId: string,
+    jobId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<DocumentImportJob> {
+    try {
+      return await this.request<DocumentImportJob>(
+        'GET',
+        `/v1/memory/documents/jobs/${encodeURIComponent(jobId)}?agent_id=${encodeURIComponent(agentId)}`,
+        undefined,
+        { signal: options.signal },
+      );
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /**
+   * Poll a document import job until it is `Completed` and return it.
+   *
+   * Bounded: a `TimeoutError` after `timeoutMs` (default 10 min). Aborting
+   * `signal` stops the wait at once (the poll in flight is aborted) and
+   * rejects with the signal's reason. A `Failed` or `Cancelled` job throws a
+   * `DakeraError` carrying the job's HTTP status and error code (413, 422
+   * `UNPROCESSABLE_CONTENT`, 504 `EXTRACTION_TIMEOUT`, ...) and the job as
+   * `responseBody`.
+   */
+  async waitForDocumentJob(
+    job: Pick<ImportDocumentAccepted, 'agent_id' | 'job_id'>,
+    options: WaitForDocumentJobOptions = {},
+  ): Promise<DocumentImportJob> {
+    const intervalMs = Math.max(0, options.intervalMs ?? 1000);
+    const timeoutMs = Math.max(0, options.timeoutMs ?? 600000);
+    const { signal } = options;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (signal?.aborted) throw abortReason(signal);
+      const current = await this.getDocumentJob(job.agent_id, job.job_id, { signal });
+      if (current.status === 'Completed') return current;
+      if (current.status === 'Failed' || current.status === 'Cancelled') {
+        const err = new DakeraError(
+          `Document import job ${current.id} ${current.status.toLowerCase()}: ${current.message ?? current.error?.code ?? 'no message'}`,
+          current.error?.status,
+          current,
+          parseErrorCode(current.error?.code),
+        );
+        if (current.message) err.details = current.message;
+        throw err;
+      }
+      if (Date.now() + intervalMs > deadline) {
+        throw new TimeoutError(
+          `Document import job ${current.id} still ${current.status} (${current.progress}%) after ${timeoutMs}ms`,
+        );
+      }
+      await this.abortableSleep(intervalMs, signal);
+    }
+  }
+
+  /**
+   * The agent's documents (`GET /v1/memory/documents?agent_id=&cursor=&limit=`,
+   * Read scope), sorted by id. Pass `next_cursor` as `cursor` for the next page;
+   * `limit` 1–500 (server default 50).
+   */
+  async listDocuments(agentId: string, options: ListDocumentsOptions = {}): Promise<DocumentListResponse> {
+    const params = new URLSearchParams({ agent_id: agentId });
+    if (options.cursor !== undefined) params.set('cursor', options.cursor);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    try {
+      const res = await this.request<DocumentListResponse>('GET', `/v1/memory/documents?${params.toString()}`);
+      return { ...res, documents: res?.documents ?? [] };
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /**
+   * Iterate over every document of the agent, page by page
+   * ({@link listDocuments} with the cursor).
+   */
+  async *iterateDocuments(agentId: string, options: { limit?: number } = {}): AsyncGenerator<DocumentSummary> {
+    let cursor: string | undefined;
+    do {
+      const page = await this.listDocuments(agentId, { cursor, limit: options.limit });
+      yield* page.documents;
+      cursor = page.next_cursor;
+    } while (cursor);
+  }
+
+  /** One document and its chunks (`GET /v1/memory/documents/{id}?agent_id=`, Read scope). */
+  async getDocument(agentId: string, documentId: string): Promise<DocumentDetail> {
+    try {
+      return await this.request<DocumentDetail>(
+        'GET',
+        `/v1/memory/documents/${encodeURIComponent(documentId)}?agent_id=${encodeURIComponent(agentId)}`,
+      );
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /**
+   * Delete a document: every chunk memory (`DELETE /v1/memory/documents/{id}?agent_id=`,
+   * Write scope). The attachment goes when no memory references it any more.
+   */
+  async deleteDocument(agentId: string, documentId: string): Promise<DeleteDocumentResponse> {
+    try {
+      return await this.request<DeleteDocumentResponse>(
+        'DELETE',
+        `/v1/memory/documents/${encodeURIComponent(documentId)}?agent_id=${encodeURIComponent(agentId)}`,
+      );
+    } catch (error) {
+      throw documentsRouteError(error);
+    }
+  }
+
+  /** `sleep` that rejects with the signal's reason as soon as it aborts. */
+  private abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) return this.sleep(ms);
+    if (signal.aborted) return Promise.reject(abortReason(signal));
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(abortReason(signal));
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   /**
