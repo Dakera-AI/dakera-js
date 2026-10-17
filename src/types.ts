@@ -478,7 +478,9 @@ export interface ClientOptions {
   /** Additional headers */
   headers?: Record<string, string>;
   /** Base URL of the dakera-ode sidecar (e.g. `"http://localhost:8080"`).
-   *  Required to call {@link DakeraClient.extractEntities}. */
+   *  Required to call {@link DakeraClient.extractEntities}.
+   *  Note: requests to the ODE sidecar currently carry the Dakera API key
+   *  (`Authorization` header); tracked in https://github.com/Dakera-AI/dakera/issues/924. */
   odeUrl?: string;
   /**
    * R9: validate the requested embedding model, index kind and distance metric
@@ -800,7 +802,7 @@ export interface RecalledMemory {
    */
   content_truncated?: boolean;
   /**
-   * Next server release: when derived sentence sub-memories are collapsed into
+   * Server v0.12.3+: when derived sentence sub-memories are collapsed into
    * their source (server flag `DAKERA_RECALL_COLLAPSE_DERIVED`, default off),
    * the best-matching sentence, set when it outranked the source's own text.
    * The result itself (`id`, `content`) is then the source memory. Absent on
@@ -808,12 +810,12 @@ export interface RecalledMemory {
    */
   matched_text?: string;
   /**
-   * Next server release: ids of the sentence sub-memories collapsed into this
+   * Server v0.12.3+: ids of the sentence sub-memories collapsed into this
    * result, best first. Absent when none matched (and on older servers).
    */
   matched_ids?: string[];
   /**
-   * Next server release: how the item got into the response when it is not a
+   * Server v0.12.3+: how the item got into the response when it is not a
    * ranked result — `"neighborhood"` for neighbourhood context returned inline
    * (`neighborhood_mode: "inline"`, after the `top_k` ranked results). Its
    * `score` is then the raw similarity of a different search and is NOT
@@ -821,7 +823,7 @@ export interface RecalledMemory {
    */
   retrieval?: RecallRetrieval;
   /**
-   * Next server release: on a {@link RecallResponse.context_memories} entry,
+   * Server v0.12.3+: on a {@link RecallResponse.context_memories} entry,
    * the id of the ranked memory it is context for.
    */
   context_of?: MemoryId;
@@ -829,7 +831,7 @@ export interface RecalledMemory {
 
 /**
  * Where a recall returns its neighbourhood context (session-adjacent memories
- * of the top results), next server release (`neighborhood_mode`):
+ * of the top results), server v0.12.3+ (`neighborhood_mode`):
  *
  * - `inline`: appended to `memories` after the `top_k` ranked results, each
  *   marked `retrieval: "neighborhood"` (the v0.11/v0.12 behaviour, and the
@@ -879,7 +881,7 @@ export interface MemoryRecallOptions {
   lang?: string;
   /**
    * Number of ranked results (server default 10). The ranking of the first `k`
-   * results does not depend on `top_k` for `k <= 10` (next server release).
+   * results does not depend on `top_k` for `k <= 10` (server v0.12.3+).
    * Under `neighborhood_mode: "inline"` (the default) neighbourhood context is
    * appended AFTER these `top_k` results, so `memories` can be longer; ask for
    * `neighborhood_mode: "separate"` when `top_k` must be the maximum number of
@@ -931,13 +933,13 @@ export interface MemoryRecallOptions {
    */
   neighborhood?: boolean;
   /**
-   * Next server release: where the neighbourhood context goes — see
+   * Server v0.12.3+: where the neighbourhood context goes — see
    * {@link NeighborhoodMode}. Omitted: the server default
    * (`DAKERA_NEIGHBORHOOD_MODE`, default `inline`).
    */
   neighborhood_mode?: NeighborhoodMode;
   /**
-   * Next server release: whether session-summary memories may be recalled.
+   * Server v0.12.3+: whether session-summary memories may be recalled.
    * Omitted: the server's choice (`DAKERA_RECALL_EXCLUDE_SUMMARIES`, default:
    * they may).
    */
@@ -955,7 +957,7 @@ export interface RecallResponse {
   /** COG-2 / KG-3: KG associated memories at configurable depth (only present when include_associated was true) */
   associated_memories?: RecalledMemory[];
   /**
-   * Next server release, `neighborhood_mode: "separate"` only: neighbourhood
+   * Server v0.12.3+, `neighborhood_mode: "separate"` only: neighbourhood
    * context of the ranked results, each entry with `context_of` (the ranked
    * memory it belongs to) and `retrieval: "neighborhood"`. Absent otherwise
    * and on older servers.
@@ -2315,7 +2317,7 @@ export interface KeyInfo {
 /**
  * Request to create an API key (`POST /admin/keys`).
  *
- * The server refuses unknown fields with 422 (next server release), and the
+ * The server refuses unknown fields with 422 (server v0.12.3+), and the
  * SDK sends only these four. The former `permissions` and `expires_at` fields
  * were never read by any server (a key created with `expires_at` never
  * expired): use `scope` and `expires_in_days`. Passing them now throws a
@@ -3000,7 +3002,7 @@ export interface ExtractionResult {
 
 /**
  * Request body for POST /v1/admin/encryption/rotate-key (SEC-3). The server
- * refuses unknown fields with 422 (next server release); the SDK sends only
+ * refuses unknown fields with 422 (server v0.12.3+); the SDK sends only
  * these, and only when defined.
  */
 export interface RotateEncryptionKeyRequest {
@@ -3533,7 +3535,7 @@ export interface BackupListResponse {
 
 /**
  * Request for POST /admin/backups. The server refuses unknown fields with 422
- * (next server release; `encrypted` for `encrypt` used to write a plaintext
+ * (server v0.12.3+; `encrypted` for `encrypt` used to write a plaintext
  * backup in silence); the SDK sends only these, and only when defined.
  */
 export interface CreateBackupRequest {

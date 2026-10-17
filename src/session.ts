@@ -44,8 +44,8 @@ export interface RecallOptions {
   /**
    * Maximum number of memories to return (default: 5). Honoured by asking the
    * server for `neighborhood_mode: "separate"`, so neighbourhood context is
-   * not appended after the `topK` results (servers older than the next
-   * release ignore the field and may still append it).
+   * not appended after the `topK` results (servers older than v0.12.3 ignore
+   * the field and may still append it).
    */
   topK?: number;
 }

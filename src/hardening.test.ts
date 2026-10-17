@@ -1,5 +1,5 @@
 /**
- * Next server release: recall API (`neighborhood_mode`, `include_summaries`,
+ * Server v0.12.3+: recall API (`neighborhood_mode`, `include_summaries`,
  * `matched_text` / `matched_ids` / `retrieval` / `context_of`,
  * `context_memories`), the strict admin request bodies (`deny_unknown_fields`
  * → 422), and the SDK's own hardening: the API key never leaves the

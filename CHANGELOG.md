@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Next Dakera server release support (Dakera-AI/dakera#917, #920) and an SDK security / robustness
-audit. Compatible with v0.12.x servers: the new request fields are left out when unset (older servers
-ignore them), the new response fields are optional.
+## [0.12.3] - Unreleased
+
+Server v0.12.3 support (Dakera-AI/dakera#917, #920) and an SDK security / robustness audit. Compatible
+with v0.12.0–v0.12.2 servers: the new request fields are left out when unset (older servers ignore them), the
+new response fields are optional; the new features need a v0.12.3+ server.
 
 ### Added
 
@@ -32,6 +34,7 @@ ignore them), the new response fields are optional.
 
 ### Changed
 
+- Version 0.12.2 → 0.12.3 (the SDK tracks server v0.12.3; `User-Agent: dakera-js/0.12.3`).
 - **Strict admin request bodies.** `createKey()`, `createNamespaceKey()`, `adminCreateBackup()` and
   `rotateEncryptionKey()` send only the fields the server accepts (a strict server answers 422 to any
   other) and never an `undefined` one; another field throws a `ValidationError` before anything is
@@ -86,6 +89,10 @@ ignore them), the new response fields are optional.
 - SSE payloads are parsed without `__proto__` keys; flattened results are built with object spread
   (own data properties), so a server response cannot change a prototype.
 - README: keep keys out of browsers (use a server-side proxy), timeouts and retry policy.
+- `odeUrl` documentation: requests to the ODE sidecar currently carry the Dakera API key, tracked in
+  Dakera-AI/dakera#924 (no code change).
+- CI: the Dakera service containers' health check uses `curl` when the image has it and
+  `dakera healthcheck` otherwise (v0.12.3+ images ship no `curl`).
 - Dev dependencies: `npm audit fix` updates brace-expansion 5.0.12 (GHSA-q2hr-2g5m-vwhr,
   GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p), nanoid 3.3.20 (GHSA-2v37-7h3g-55p8) and source-map-js
   1.2.2 (GHSA-68fv-2mgg-jv7q); `npm audit` reports 0 vulnerabilities. The published package has no

@@ -439,7 +439,7 @@ const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
 /** SDK version, kept in sync with package.json. Used for the default User-Agent. */
-const SDK_VERSION = '0.12.2';
+const SDK_VERSION = '0.12.3';
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -2200,7 +2200,7 @@ export class DakeraClient {
    * Search memories for an agent (`POST /v1/memory/search`). Undefined options
    * are not sent. Items carry the same result fields as recall, including
    * `matched_text` / `matched_ids` when the server collapses derived sentence
-   * sub-memories (next server release, `DAKERA_RECALL_COLLAPSE_DERIVED`).
+   * sub-memories (server v0.12.3+, `DAKERA_RECALL_COLLAPSE_DERIVED`).
    */
   async searchMemories(agentId: string, query: string, options?: SearchMemoriesOptions): Promise<RecalledMemory[]> {
     const body: Record<string, unknown> = { query };
@@ -3075,7 +3075,7 @@ export class DakeraClient {
    * request (`name`, `backup_type`, `namespaces`, `encrypt`, `compression`)
    * and returns the whole response. This method used to send
    * `{include_data}`, a field no server reads and which a strict server
-   * (next release) refuses with 422; it now creates a full backup named
+   * (v0.12.3+) refuses with 422; it now creates a full backup named
    * `backup-<unix ms>`. `false` (metadata only) has no server equivalent and
    * throws a `ValidationError`.
    */
@@ -3163,7 +3163,7 @@ export class DakeraClient {
    * fields listed in the server documentation.
    *
    * Sends only `new_key`, `namespace` and `wait_secs`, and only when defined;
-   * the server refuses unknown fields with 422 (next server release: a
+   * the server refuses unknown fields with 422 (server v0.12.3+: a
    * misspelled `namespace` used to rotate the GLOBAL key). Any other field in
    * a request object throws a `ValidationError` before sending.
    *
@@ -3200,7 +3200,7 @@ export class DakeraClient {
    *
    * Sends only `name`, `scope`, `namespaces` and `expires_in_days`, and only
    * when defined (`namespaces: null` — every namespace — is sent as `null`).
-   * The server refuses unknown fields with 422 (next server release); this
+   * The server refuses unknown fields with 422 (server v0.12.3+); this
    * method throws a `ValidationError` for one before sending anything, so a
    * misspelling (`namespace`, `expires_in`) can never mint a broader or
    * non-expiring key, whatever the server version.
@@ -3599,7 +3599,7 @@ export class DakeraClient {
    *   prefix patterns, validated and contained in the caller's grants) and
    *   `expires_in_days`. Only these fields are sent, and only when defined;
    *   any other option throws a `ValidationError` before sending (the server
-   *   answers 422 to an unknown field, next server release).
+   *   answers 422 to an unknown field, server v0.12.3+).
    */
   async createNamespaceKey(
     namespace: string,
@@ -4152,7 +4152,7 @@ export class DakeraClient {
    *
    * Sends only `name`, `backup_type`, `namespaces`, `encrypt` and
    * `compression`, and only when defined. The server refuses unknown fields
-   * with 422 (next server release: `encrypted` for `encrypt` used to write a
+   * with 422 (server v0.12.3+: `encrypted` for `encrypt` used to write a
    * plaintext backup in silence); any other field throws a `ValidationError`
    * before sending.
    */
@@ -4222,7 +4222,7 @@ export class DakeraClient {
   /**
    * POST /ops/shutdown — request a graceful shutdown of the node.
    *
-   * Requires a global **super_admin** key (next server release; a global
+   * Requires a global **super_admin** key (server v0.12.3+; a global
    * `admin` key gets 403 `AuthorizationError`): a shutdown stops the node for
    * every tenant. Never retried.
    */

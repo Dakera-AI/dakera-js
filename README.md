@@ -128,10 +128,11 @@ you `break` out of the loop.
 
 ---
 
-## Next server release: recall and admin changes
+## What's new for Dakera server v0.12.3
 
-Additive; works unchanged against v0.12.x servers (they ignore the new request fields and send none of the
-new response fields, which are optional).
+This SDK release (0.12.3) targets Dakera server **v0.12.3** and stays **compatible with v0.12.0–v0.12.2 servers**:
+the new request fields are left out when unset (older servers ignore them) and the new response fields are
+optional. The features below need a **v0.12.3+** server.
 
 - **`neighborhood_mode`** on `recall()` — `'inline' | 'separate' | 'off'` (omit = server default
   `DAKERA_NEIGHBORHOOD_MODE`, default `inline`; `neighborhood: false` still means off and wins).
@@ -150,7 +151,9 @@ new response fields, which are optional).
   `POST /admin/encryption/rotate-key` answer **422** to an unknown field. `createKey()`,
   `createNamespaceKey()`, `adminCreateBackup()` and `rotateEncryptionKey()` send only the fields the server
   knows, never `undefined` ones, and throw a `ValidationError` for any other field before sending.
-- **`opsShutdown()`** needs a global **super_admin** key (`admin` → 403).
+- **`opsShutdown()`** needs a global **super_admin** key on a v0.12.3 server (`admin` → 403).
+- **ODE sidecar** — requests to `odeUrl` currently carry the Dakera API key; tracked in
+  [Dakera-AI/dakera#924](https://github.com/Dakera-AI/dakera/issues/924).
 
 ```typescript
 const res = await client.recall('my-agent', 'deploy port', { top_k: 5, neighborhood_mode: 'separate' });
