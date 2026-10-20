@@ -45,8 +45,9 @@ function parseErrorCode(raw: unknown): ErrorCode {
 function flattenRecalledMemory(item: any): any {
   if (item && typeof item === 'object' && item.memory && typeof item.memory === 'object') {
     const { memory, score: _rawScore, ...result } = item;
-    // smart_score is the server's ranking key; prefer it so .score reflects actual rank order.
-    const score = item.smart_score ?? item.weighted_score ?? item.score;
+    // rank_score (v0.12.3, #940) is the server's ranking field, non-increasing over a
+    // recall's results; older servers: smart_score, then weighted_score, then score.
+    const score = item.rank_score ?? item.smart_score ?? item.weighted_score ?? item.score;
     return { ...memory, ...result, score };
   }
   return item;

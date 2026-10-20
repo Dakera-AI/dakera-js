@@ -779,9 +779,17 @@ export interface RecalledMemory {
   memory_type: string;
   /** Importance score */
   importance: number;
-  /** Ranking score — equals smart_score when present, then weighted_score, then raw score. */
+  /**
+   * Ranking score — the server's `rank_score` when present (v0.12.3+: non-increasing over a
+   * recall's results, in order), else smart_score, then weighted_score, then raw score.
+   */
   score: number;
-  /** Raw smart_score from the server (the primary ranking key). */
+  /**
+   * The server's ranking field (recall, v0.12.3+, #940): non-increasing over `memories` in
+   * response order — sort or threshold on this. Absent from older servers and from search.
+   */
+  rank_score?: number;
+  /** Raw smart_score from the server. */
   smart_score?: number;
   /** Raw weighted_score from the server. */
   weighted_score?: number;

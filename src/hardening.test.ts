@@ -167,6 +167,24 @@ describe('recall: neighbourhood mode, summaries and result provenance', () => {
     expect(res.rerank).toEqual(REPORT);
   });
 
+  it('rank_score is the ranking score and never rises (#940)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      json(200, {
+        memories: [
+          { memory: MEM('m1', 'a'), score: 0.0001, smart_score: 0.3, rank_score: 0.62 },
+          { memory: MEM('m2', 'b'), score: 0.0023, smart_score: 0.5, rank_score: 0.41 },
+        ],
+        query_embedding_time_ms: 1,
+        search_time_ms: 1,
+        rerank: REPORT,
+        rerank_report: REPORT,
+      }),
+    );
+    const res = await client.recall('a1', 'q');
+    expect(res.memories.map((m) => m.rank_score)).toEqual([0.62, 0.41]);
+    expect(res.memories.map((m) => m.score)).toEqual([0.62, 0.41]);
+  });
+
   it('inline: neighbourhood items after the ranked results keep retrieval', async () => {
     mockFetch.mockResolvedValueOnce(
       json(200, {
