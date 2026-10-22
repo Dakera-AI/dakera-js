@@ -143,6 +143,13 @@ export interface AuthCapabilities {
 export interface NamingCapabilities {
   agent_id_pattern: string;
   agent_id_max_bytes: number;
+  /**
+   * Server v0.12.3+: pattern a session id must match (the memory-id alphabet:
+   * `:` is allowed, e.g. `user:42`). Undefined on older servers.
+   */
+  session_id_pattern?: string;
+  /** Server v0.12.3+: longest session id, in bytes. Undefined on older servers. */
+  session_id_max_bytes?: number;
   agent_namespace_prefix: string;
   agent_namespace_max_bytes: number;
   namespace_pattern: string;
@@ -358,6 +365,11 @@ function parseNaming(raw: unknown): NamingCapabilities | undefined {
   return {
     agent_id_pattern: text(raw.agent_id_pattern),
     agent_id_max_bytes: integer(raw.agent_id_max_bytes),
+    ...optional('session_id_pattern', typeof raw.session_id_pattern === 'string' ? raw.session_id_pattern : undefined),
+    ...optional(
+      'session_id_max_bytes',
+      typeof raw.session_id_max_bytes === 'number' ? integer(raw.session_id_max_bytes) : undefined,
+    ),
     agent_namespace_prefix: text(raw.agent_namespace_prefix, '_dakera_agent_'),
     agent_namespace_max_bytes: integer(raw.agent_namespace_max_bytes),
     namespace_pattern: text(raw.namespace_pattern),

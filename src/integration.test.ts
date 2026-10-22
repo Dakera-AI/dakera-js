@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { DakeraClient } from "./client";
-import { AuthenticationError } from "./errors";
+import { AuthenticationError, NotFoundError } from "./errors";
 import { ChatMemorySession } from "./session";
 
 const DAKERA_URL = process.env.DAKERA_TEST_URL || "http://localhost:3000";
@@ -440,5 +440,179 @@ describeIntegration("Server v0.12.2 (agents, whoami, session lifecycle, previews
     expect(memories[0].content_truncated).toBe(true);
     expect(memories[0].content.length).toBe(7);
     expect(memories[0].content_len).toBeGreaterThan(7);
+  });
+});
+
+// Server v0.12.3 additions. Each test returns early against an older server
+// (server_version < 0.12.3), so the suite stays green on the CI's 0.12.0 image.
+function atLeast(version: string, min: [number, number, number]): boolean {
+  const parts = version.split(/[.+-]/).slice(0, 3).map((p) => Number.parseInt(p, 10));
+  for (let i = 0; i < 3; i++) {
+    const v = Number.isFinite(parts[i]) ? parts[i] : 0;
+    if (v !== min[i]) return v > min[i];
+  }
+  return true;
+}
+
+describeIntegration("Server v0.12.3 (event_time, warnings, dedup trash, get without agent)", () => {
+  let v0123 = false;
+
+  beforeAll(async () => {
+    const caps = await client.capabilities({ refresh: true });
+    v0123 = atLeast(caps.server_version, [0, 12, 3]);
+  });
+
+  it("recall / search / batch recall of an agent that stored nothing answer 200, empty", async () => {
+    if (!v0123) return;
+    const agentId = `integ-empty-${crypto.randomUUID().slice(0, 8)}`;
+    const recalled = await client.recall(agentId, "anything at all");
+    expect(recalled.memories).toEqual([]);
+    expect(await client.searchMemories(agentId, "anything at all")).toEqual([]);
+    const batch = await client.batchRecall({ agent_id: agentId, filter: { min_importance: 0.1 } });
+    expect(batch.memories).toEqual([]);
+  });
+
+  it("store with event_time records _dakera_event_time", async () => {
+    if (!v0123) return;
+    const agentId = `integ-evt-${crypto.randomUUID().slice(0, 8)}`;
+    const stored = await client.storeMemory(agentId, {
+      content: "The team moved the launch to Friday.",
+      event_time: new Date("2023-05-20T02:21:00Z"),
+    });
+    expect(stored.memory.metadata?._dakera_event_time).toBe(1684549260);
+
+    const batch = await client.storeMemoriesBatch({
+      agent_id: agentId,
+      memories: [
+        { content: "First imported message.", event_time: 1684549200 },
+        { content: "Second imported message.", event_time: "2023-05-20T02:22:00Z" },
+      ],
+    });
+    expect(batch.stored_count).toBe(2);
+    const second = await client.getMemory(agentId, batch.stored[1].id);
+    expect(second.metadata?._dakera_event_time).toBe(1684549320);
+  });
+
+  it("store, batch store and recall with every optional field draw no warnings", async () => {
+    if (!v0123) return;
+    const agentId = `integ-warn-${crypto.randomUUID().slice(0, 8)}`;
+    const session = await client.startSession(agentId);
+    const stored = await client.storeMemory(agentId, {
+      content: "Every optional store field is a server field.",
+      memory_type: "semantic",
+      importance: 0.7,
+      metadata: { source: "integration" },
+      ttl_seconds: 86400,
+      expires_at: Math.floor(Date.now() / 1000) + 86400,
+      session_id: session.id,
+      tags: ["integ"],
+      id: `integ-${crypto.randomUUID().slice(0, 8)}`,
+      event_time: 1684549260,
+      valid_from: 1684549260,
+      lang: "en",
+    });
+    expect(stored.warnings).toBeUndefined();
+
+    const batch = await client.storeMemoriesBatch({
+      agent_id: agentId,
+      lang: "en",
+      memories: [
+        {
+          content: "Every optional batch item field is a server field.",
+          memory_type: "episodic",
+          importance: 0.6,
+          tags: ["integ"],
+          session_id: session.id,
+          metadata: { source: "integration" },
+          ttl_seconds: 86400,
+          expires_at: Math.floor(Date.now() / 1000) + 86400,
+          id: `integ-${crypto.randomUUID().slice(0, 8)}`,
+          event_time: "2023-05-20T02:21:00Z",
+        },
+      ],
+    });
+    expect(batch.warnings).toBeUndefined();
+
+    const recalled = await client.recall(agentId, "optional fields", {
+      lang: "en",
+      top_k: 5,
+      memory_type: "semantic",
+      session_id: session.id,
+      tags: ["integ"],
+      min_importance: 0.1,
+      importance_weighted: true,
+      include_associated: true,
+      associated_memories_cap: 5,
+      associated_memories_depth: 1,
+      associated_memories_min_weight: 0,
+      since: "2020-01-01T00:00:00Z",
+      until: "2100-01-01T00:00:00Z",
+      routing: "hybrid",
+      rerank: false,
+      rerank_candidates: 20,
+      fusion: "minmax",
+      vector_weight: 0.5,
+      iterations: 1,
+      neighborhood: true,
+      neighborhood_mode: "separate",
+      include_summaries: false,
+    });
+    expect(recalled.warnings).toBeUndefined();
+
+    const batchRecalled = await client.batchRecall({
+      agent_id: agentId,
+      limit: 10,
+      filter: {
+        tags: ["integ"],
+        min_importance: 0.1,
+        max_importance: 1,
+        created_after: 0,
+        created_before: Math.floor(Date.now() / 1000) + 3600,
+        memory_type: "semantic",
+        session_id: session.id,
+      },
+    });
+    expect(batchRecalled.warnings).toBeUndefined();
+    expect(batchRecalled.memories.length).toBeGreaterThan(0);
+    await client.endSession(session.id);
+  });
+
+  it("a session id with ':' is accepted", async () => {
+    if (!v0123) return;
+    const agentId = `integ-colon-${crypto.randomUUID().slice(0, 8)}`;
+    const stored = await client.storeMemory(agentId, { content: "Colon session.", session_id: "eval:run_1:sample:0" });
+    expect(stored.memory.id).toBeDefined();
+  });
+
+  it("listDeduplicated of a fresh agent is empty; restoring an unknown id is a 404", async () => {
+    if (!v0123) return;
+    const agentId = `integ-dedup-${crypto.randomUUID().slice(0, 8)}`;
+    await client.storeMemory(agentId, { content: "Nothing was deduplicated here." });
+    const listed = await client.listDeduplicated(agentId);
+    expect(listed.agent_id).toBe(agentId);
+    expect(listed.count).toBe(0);
+    expect(listed.memories).toEqual([]);
+    await expect(client.restoreDeduplicated(agentId, "no-such-memory")).rejects.toThrow(NotFoundError);
+  });
+
+  it("getMemory without an agent id finds the memory", async () => {
+    if (!v0123) return;
+    const agentId = `integ-noagent-${crypto.randomUUID().slice(0, 8)}`;
+    const id = `integ-only-${crypto.randomUUID()}`;
+    await client.storeMemory(agentId, { content: "Found without naming the agent.", id });
+    const found = await client.getMemory(id);
+    expect(found.id).toBe(id);
+    expect(found.agent_id).toBe(agentId);
+    await expect(client.getMemory(`missing-${crypto.randomUUID()}`)).rejects.toThrow(NotFoundError);
+  });
+
+  it("autopilot status and capabilities carry the v0.12.3 fields", async () => {
+    if (!v0123) return;
+    const status = await client.autopilotStatus();
+    expect(["off", "report", "merge"]).toContain(status.config.dedup_mode);
+    expect(typeof status.config.trash_retention_hours).toBe("number");
+    const caps = await client.capabilities({ refresh: true });
+    expect(caps.naming?.session_id_max_bytes).toBeGreaterThan(0);
+    expect(new RegExp(caps.naming!.session_id_pattern!).test("user:42")).toBe(true);
   });
 });

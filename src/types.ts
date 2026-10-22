@@ -689,6 +689,59 @@ export interface ConfigureNamespaceResponse {
  */
 export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'working' | 'strategic';
 
+/**
+ * When a memory's event happened (server v0.12.3+, `event_time` on
+ * `POST /v1/memory/store` and on each `POST /v1/memories/store/batch` item):
+ *
+ * - a `number`: Unix **seconds** (a fractional part is dropped by the server;
+ *   milliseconds are refused with a 400),
+ * - a `string`: an RFC 3339 timestamp such as `2023-05-20T02:21:00Z`,
+ * - a `Date`: sent as its ISO 8601 / RFC 3339 string (`toISOString()`).
+ *
+ * The bounds (1970 to 2286; a future time is accepted) are the server's: an
+ * out-of-range value is a 400 naming the field. The SDK only refuses values
+ * that are not a time at all (`NaN`, an invalid `Date`).
+ */
+export type EventTime = number | string | Date;
+
+/**
+ * How the embedding model cut a memory's text (server v0.12.3+,
+ * Dakera-AI/dakera#933): the vector covers its first `embedded_tokens` only.
+ * Flattened into the store and update responses; every field is absent when
+ * the model reads the whole text (and on older servers).
+ */
+export interface EmbedTruncationReport {
+  /** `true` when the text is longer than the embedding model reads. */
+  truncated?: boolean;
+  /** Tokens of the whole text (document prefix and special tokens included). */
+  content_tokens?: number;
+  /** Tokens the model embedded: the vector covers this prefix of the text. */
+  embedded_tokens?: number;
+  /** The model's token cap (`effective_max_seq_length` in `capabilities()`). */
+  max_tokens?: number;
+  /** The counts are the server's model-free estimate (the model is not loaded on that node). Absent = false. */
+  tokens_estimated?: boolean;
+  /**
+   * Overlapping windows of the text derived as sub-memories so its tail is
+   * searchable (`DAKERA_LONG_CONTENT_WINDOWS`); `0` with that switch off.
+   */
+  windows?: number;
+}
+
+/** One memory of a batch whose text the embedding model cut (`BatchStoreMemoryResponse.truncated`). */
+export interface TruncatedMemory {
+  /** The memory's id. */
+  id: MemoryId;
+  /** Always `true`. */
+  truncated: boolean;
+  content_tokens: number;
+  embedded_tokens: number;
+  max_tokens: number;
+  /** Absent = false. */
+  tokens_estimated?: boolean;
+  windows: number;
+}
+
 /** Request to store a memory */
 export interface StoreMemoryRequest {
   /**
@@ -714,12 +767,37 @@ export interface StoreMemoryRequest {
   session_id?: string;
   /** Optional tags to associate with the memory */
   tags?: string[];
-  /** Pre-computed embedding */
+  /**
+   * Optional custom memory id (the server generates one when omitted). A
+   * re-store of an existing id is a full replacement.
+   */
+  id?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#932): when the memory's event HAPPENED,
+   * for a client that writes history (an import, a backfill, a replayed
+   * conversation). See {@link EventTime}. The server records it as the
+   * server-owned metadata key `_dakera_event_time` (integer Unix seconds, also
+   * the event date `_dakera_content_date` unless the metadata names one);
+   * recency, `since` / `until`, the query-inferred time range and the
+   * temporal graph edges then read it instead of the ingest time.
+   * `created_at` stays the ingest time (TTL and decay count from it). Out of
+   * the server's bounds (before 1970, after 2286): 400 naming the field. A
+   * client cannot set `_dakera_event_time` in `metadata` itself. Not sent when
+   * undefined; older servers ignore it.
+   */
+  event_time?: EventTime;
+  /**
+   * @deprecated No server reads a pre-computed embedding on a memory store
+   * (the server embeds `content` itself). Still sent when set, so a v0.12.3+
+   * server lists it in the response's `warnings`.
+   */
   embedding?: number[];
   /**
-   * Bi-temporal validity start — Unix timestamp (seconds) indicating when this
-   * memory becomes temporally valid. Defaults to ingest time when omitted.
-   * Used by temporal recall queries (server v0.11.98+, DAK-7424).
+   * @deprecated Use {@link StoreMemoryRequest.event_time}. Bi-temporal validity
+   * start (Unix seconds). The server reads it from the memory's metadata, not
+   * from the request, so the SDK sends it as `metadata.valid_from` (an explicit
+   * `metadata.valid_from` wins). Before 0.12.3 the SDK sent it at the top level,
+   * where no server read it.
    */
   valid_from?: number;
   /**
@@ -756,6 +834,20 @@ export interface Memory {
   updated_at?: string;
   /** Access count */
   access_count?: number;
+  /** The agent the memory belongs to. */
+  agent_id?: string;
+  /** The memory's session, when it has one. */
+  session_id?: string;
+  /** The memory's tags. */
+  tags?: string[];
+  /** Last access (Unix seconds). */
+  last_accessed_at?: number;
+  /** Time to live in seconds, when set. */
+  ttl_seconds?: number;
+  /** Expiry (Unix seconds), when set. */
+  expires_at?: number;
+  /** v0.12: the memory's attachment reference, when it has one. */
+  attachment_ref?: string;
   /**
    * Server v0.12.2+, listings asked with `content_preview_chars` only: length
    * of the FULL content in characters (Unicode scalar values).
@@ -881,6 +973,12 @@ export interface RerankReport {
    * not used (`low_confidence`). Absent when it ran and was used.
    */
   skipped?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#926): `true` when the server's candidate
+   * cap (`DAKERA_RERANK_MAX_CANDIDATES`) left part of the pool unscored, or
+   * lowered the request's `rerank_candidates` to it. Absent otherwise.
+   */
+  capped?: boolean;
 }
 
 /**
@@ -985,6 +1083,12 @@ export interface RecallResponse {
   rerank_report?: RerankReport;
   /** Late-interaction strategy only: the first stage that served the recall. */
   late_interaction_first_stage?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#938): request fields the server ignored
+   * (`"unknown field 'x' ignored"`). Absent when it ignored nothing (and on
+   * older servers). The SDK sends only fields the server knows.
+   */
+  warnings?: string[];
 }
 
 /**
@@ -1023,9 +1127,14 @@ export interface SearchMemoriesOptions {
  * The server wraps the created memory in a nested `memory` object:
  * `{"memory": {"id": "...", "agent_id": "...", ...}, "embedding_time_ms": N}`.
  */
-export interface StoreMemoryResponse {
+export interface StoreMemoryResponse extends EmbedTruncationReport {
   /** The stored memory object */
   memory: Memory;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#938): request fields the server ignored.
+   * Absent when it ignored nothing (and on older servers).
+   */
+  warnings?: string[];
   /** Embedding latency in milliseconds */
   embedding_time_ms?: number;
   /**
@@ -1036,6 +1145,14 @@ export interface StoreMemoryResponse {
    */
   session_state?: SessionState;
 }
+
+/**
+ * Answer of `PUT /v1/memory/update/{id}`: the updated memory (its fields at
+ * the top level, as before) and, server v0.12.3+, the truncation report of its
+ * new content when that content was re-embedded and is longer than the
+ * embedding model reads.
+ */
+export interface UpdateMemoryResponse extends Memory, EmbedTruncationReport {}
 
 /** Request to update a memory */
 export interface UpdateMemoryRequest {
@@ -1939,7 +2056,8 @@ export type DakeraEvent =
  *
  * event_type values:
  *   connected | stored | recalled | forgotten | consolidated |
- *   importance_updated | session_started | session_ended | stream_lagged
+ *   importance_updated | session_started | session_ended | stream_lagged |
+ *   deduplicated | restored (server v0.12.3+, Dakera-AI/dakera#930)
  *
  * The `connected` event is emitted immediately on stream subscription to
  * signal the connection is live. `agent_id` will be an empty string for
@@ -1962,6 +2080,13 @@ export interface MemoryEvent {
   tags?: string[];
   /** Session ID (present for session_started / session_ended events) */
   session_id?: string;
+  /**
+   * Why the event happened, when the server says: `session_ended` →
+   * `"client"` or `"idle"` (v0.12.2+); `deduplicated` →
+   * `"absorbed into <survivor>"`, `consolidated` → `"merged into <id>"`
+   * (v0.12.3+). Absent otherwise.
+   */
+  reason?: string;
 }
 
 // =============================================================================
@@ -2137,12 +2262,33 @@ export interface BackupInfo {
 // AutoPilot Types (PILOT-1 / PILOT-2 / PILOT-3)
 // =============================================================================
 
+/**
+ * What the autopilot dedup pass does (server v0.12.3+, Dakera-AI/dakera#930):
+ * `off` (the server default since v0.12.3: no pass), `report` (finds duplicate
+ * groups and reports them, changes nothing) or `merge` (folds and deletes, the
+ * behaviour of every earlier release).
+ */
+export type AutoPilotDedupMode = 'off' | 'report' | 'merge';
+/** Every {@link AutoPilotDedupMode}. */
+export const AUTOPILOT_DEDUP_MODES: readonly AutoPilotDedupMode[] = ['off', 'report', 'merge'];
+
 /** AutoPilot configuration */
 export interface AutoPilotConfig {
   enabled: boolean;
   dedup_threshold: number;
   dedup_interval_hours: number;
   consolidation_interval_hours: number;
+  /** Server v0.12.3+: the dedup mode ({@link AutoPilotDedupMode}). Absent on older servers. */
+  dedup_mode?: AutoPilotDedupMode | (string & {});
+  /** Server v0.12.3+: whether dedup may fold memories of different sessions (default false). */
+  dedup_cross_session?: boolean;
+  /** Server v0.12.3+: whether consolidation may merge memories of different sessions (default false). */
+  consolidate_cross_session?: boolean;
+  /**
+   * Server v0.12.3+: hours a memory deleted by dedup or consolidation stays
+   * restorable ({@link DakeraClient.listDeduplicated}); `0` = no copy (hard delete).
+   */
+  trash_retention_hours?: number;
 }
 
 /** Result snapshot from a deduplication cycle */
@@ -2150,6 +2296,8 @@ export interface DedupResultSnapshot {
   namespaces_processed: number;
   memories_scanned: number;
   duplicates_removed: number;
+  /** Server v0.12.3+: duplicates the pass found (in `report` mode none is removed). */
+  duplicates_found?: number;
 }
 
 /** Result snapshot from a consolidation cycle */
@@ -2177,6 +2325,14 @@ export interface AutoPilotConfigRequest {
   dedup_threshold?: number;
   dedup_interval_hours?: number;
   consolidation_interval_hours?: number;
+  /** Server v0.12.3+: `off`, `report` or `merge`. */
+  dedup_mode?: AutoPilotDedupMode;
+  /** Server v0.12.3+: let dedup fold memories of different sessions. */
+  dedup_cross_session?: boolean;
+  /** Server v0.12.3+: let consolidation merge memories of different sessions. */
+  consolidate_cross_session?: boolean;
+  /** Server v0.12.3+: hours a deleted memory stays restorable (0..=8760; 0 = no copy). */
+  trash_retention_hours?: number;
 }
 
 /** PILOT-2: AutoPilot configuration update response */
@@ -2194,6 +2350,10 @@ export interface AutoPilotDedupResult {
   namespaces_processed: number;
   memories_scanned: number;
   duplicates_removed: number;
+  /** Server v0.12.3+: duplicates found (in `report` mode none is removed). */
+  duplicates_found?: number;
+  /** Server v0.12.3+: the mode the pass ran in (`report` or `merge`). */
+  mode?: AutoPilotDedupMode | (string & {});
 }
 
 /** Consolidation result from a manual trigger */
@@ -2484,6 +2644,11 @@ export interface BatchRecallResponse {
   filtered: number;
   /** True when the result set was capped by `limit` and more matching memories exist. */
   truncated: boolean;
+  /**
+   * Server v0.12.3+: request fields the server ignored (top level and
+   * `filter`). Absent when it ignored nothing.
+   */
+  warnings?: string[];
 }
 
 /** Request body for `DELETE /v1/memories/forget/batch`. */
@@ -2529,6 +2694,12 @@ export interface BatchStoreMemoryItem {
   id?: string;
   /** v0.12: `sha256:<hex>` attachment reference (see {@link StoreMemoryRequest.attachment_ref}). */
   attachment_ref?: string;
+  /**
+   * Server v0.12.3+: when this memory's event happened ({@link EventTime},
+   * see {@link StoreMemoryRequest.event_time}). Out of bounds: 400 naming
+   * `memories[i].event_time`. Not sent when undefined.
+   */
+  event_time?: EventTime;
 }
 
 /**
@@ -2570,6 +2741,17 @@ export interface BatchStoreMemoryResponse {
    * (the stores still succeeded). Omitted when none.
    */
   ended_sessions?: string[];
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#933): the stored memories whose text is
+   * longer than the embedding model reads. Absent when there are none.
+   * (Not the `truncated: boolean` of {@link BatchRecallResponse}.)
+   */
+  truncated?: TruncatedMemory[];
+  /**
+   * Server v0.12.3+: request fields the server ignored (top level and each
+   * `memories[]` item). Absent when it ignored nothing.
+   */
+  warnings?: string[];
 }
 
 // ============================================================================
@@ -2977,7 +3159,21 @@ export interface AuditEvent {
   importance?: number;
   /** Unix milliseconds. */
   timestamp: number;
+  /**
+   * Server v0.12.3+: why the event happened, when the writer says
+   * (`deduplicated` → `"absorbed into <survivor>"`, `consolidated` →
+   * `"merged into <id>"`). Absent on older rows and servers.
+   */
+  reason?: string;
 }
+
+/**
+ * Audit `event_type` values a v0.12.3 server writes for deletions and
+ * restores (Dakera-AI/dakera#930); filter with `listAuditEvents({ eventType })`.
+ */
+export const AUDIT_EVENT_DEDUPLICATED = 'deduplicated';
+export const AUDIT_EVENT_CONSOLIDATED = 'consolidated';
+export const AUDIT_EVENT_RESTORED = 'restored';
 
 /** Response from GET /v1/audit (OBS-1). */
 export interface AuditListResponse {
@@ -4122,7 +4318,66 @@ export interface AdminConfig {
   session_idle_timeout_secs?: number;
   /** Live settings changed through `PUT /admin/config` (re-applied at startup). */
   runtime_overrides?: string[];
+  /**
+   * Server v0.12.3+: autopilot settings set through `PUT /admin/autopilot/config`
+   * (`autopilot_dedup_mode`, `autopilot_dedup_cross_session`,
+   * `autopilot_consolidate_cross_session`, `autopilot_trash_retention_hours`);
+   * absent until set there (the environment rules).
+   */
+  autopilot_dedup_mode?: AutoPilotDedupMode | (string & {});
+  autopilot_dedup_cross_session?: boolean;
+  autopilot_consolidate_cross_session?: boolean;
+  autopilot_trash_retention_hours?: number;
   [key: string]: unknown;
+}
+
+/**
+ * Answer of `PUT /admin/config` (`updateConfig()`): `{success, config,
+ * message, warnings?}`. Typed as an {@link AdminConfig} too for source
+ * compatibility with SDK releases that declared that return type; read the
+ * applied configuration from `config`.
+ */
+export interface AdminConfigUpdateResponse extends AdminConfig {
+  success?: boolean;
+  /** The configuration after the update. */
+  config?: AdminConfig;
+  message?: string;
+  /** Unknown or invalid keys the server did not apply. */
+  warnings?: string[];
+}
+
+// =============================================================================
+// Deduplicated memories (server v0.12.3+, Dakera-AI/dakera#930)
+// =============================================================================
+
+/** Which pass deleted a {@link DeduplicatedMemory}. */
+export type DeduplicatedKind = 'deduplication' | 'consolidation';
+
+/**
+ * A memory deduplication or consolidation deleted that can still be restored
+ * (`GET /v1/memory/deduplicated`).
+ */
+export interface DeduplicatedMemory {
+  /** The deleted memory's id (restore it under this id). */
+  id: MemoryId;
+  /** Which pass deleted it. */
+  kind: DeduplicatedKind | (string & {});
+  /** The memory it was folded (deduplication) or merged (consolidation) into. */
+  survivor_id: MemoryId;
+  /** Its session, if it had one. */
+  session_id?: string;
+  /** When it was deleted (Unix seconds). */
+  deleted_at: number;
+  /** Until when it can be restored (Unix seconds); purged after. */
+  restorable_until: number;
+}
+
+/** Answer of `GET /v1/memory/deduplicated?agent_id=`. */
+export interface DeduplicatedListResponse {
+  agent_id: string;
+  /** Restorable memories, newest first. */
+  memories: DeduplicatedMemory[];
+  count: number;
 }
 
 /** Derived data still owed (part of {@link DerivationStatus}). */

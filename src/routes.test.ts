@@ -227,9 +227,10 @@ const V0122_ROUTES = [
 ];
 
 /**
- * Routes server v0.12.3 adds: document import (Dakera-AI/dakera#923). The SDK
+ * Routes server v0.12.3 adds: document import (Dakera-AI/dakera#923; the SDK
  * methods calling them answer 404 `ROUTE_NOT_FOUND` on an older server, which
- * they report as "needs Dakera server v0.12.3+".
+ * they report as "needs Dakera server v0.12.3+") and the deduplicated-memory
+ * routes (Dakera-AI/dakera#930).
  */
 const V0123_ROUTES = [
   'POST /v1/memory/documents',
@@ -238,6 +239,8 @@ const V0123_ROUTES = [
   'GET /v1/memory/documents/{document_id}',
   'DELETE /v1/memory/documents/{document_id}',
   'POST /v1/namespaces/{namespace}/attachments/{reference}/document',
+  'GET /v1/memory/deduplicated',
+  'POST /v1/memory/deduplicated/{id}/restore',
 ];
 
 const known = new Set(

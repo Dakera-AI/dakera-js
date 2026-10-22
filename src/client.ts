@@ -59,6 +59,58 @@ function flattenRecalledList(raw: unknown): RecalledMemory[] | undefined {
 }
 
 /**
+ * The wire form of an `event_time` (server v0.12.3+): Unix seconds as given,
+ * an RFC 3339 string as given, a `Date` as its ISO 8601 string. Only values
+ * that are not a time at all are refused here; the bounds are the server's.
+ */
+function eventTimeWire(value: EventTime, field: string): number | string {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new ValidationError(`${field} is an invalid Date`, undefined, undefined, ErrorCode.INVALID_REQUEST);
+    }
+    return value.toISOString();
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new ValidationError(
+        `${field} must be finite Unix seconds (got ${String(value)})`,
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    return value;
+  }
+  if (typeof value === 'string') return value;
+  throw new ValidationError(
+    `${field} must be Unix seconds, an RFC 3339 string or a Date`,
+    undefined,
+    undefined,
+    ErrorCode.INVALID_REQUEST,
+  );
+}
+
+/**
+ * The wire form of one memory to store (single store or a batch item):
+ * `event_time` in its wire form, and the deprecated `valid_from` moved into
+ * `metadata.valid_from`, where the server reads it (an explicit
+ * `metadata.valid_from` wins). Undefined fields stay out.
+ */
+function memoryWriteBody(item: object, field: string): Record<string, unknown> {
+  const { event_time, valid_from, ...rest } = item as { event_time?: EventTime; valid_from?: number } & Record<
+    string,
+    unknown
+  >;
+  const body: Record<string, unknown> = { ...rest };
+  if (event_time !== undefined && event_time !== null) body.event_time = eventTimeWire(event_time, field);
+  if (valid_from !== undefined && valid_from !== null) {
+    const metadata = (body.metadata ?? {}) as Record<string, unknown>;
+    body.metadata = 'valid_from' in metadata ? metadata : { ...metadata, valid_from };
+  }
+  return body;
+}
+
+/**
  * Build the JSON body of a request whose server struct refuses unknown fields
  * (`deny_unknown_fields`, 422): copy the `allowed` fields that are not
  * `undefined` (`null` is kept: it means something to the server) and throw a
@@ -293,6 +345,10 @@ import type {
   StorageAnalytics,
   StoreMemoryRequest,
   StoreMemoryResponse,
+  UpdateMemoryResponse,
+  EventTime,
+  DeduplicatedListResponse,
+  AdminConfigUpdateResponse,
   SummarizeRequest,
   SummarizeResponse,
   TextDocument,
@@ -452,7 +508,7 @@ import type {
   WaitForJobOptions,
   WaitUntilReadyOptions,
 } from './types';
-import { computeTifScore, isNeighborhoodMode, NEIGHBORHOOD_MODES } from './types';
+import { AUTOPILOT_DEDUP_MODES, computeTifScore, isNeighborhoodMode, NEIGHBORHOOD_MODES } from './types';
 
 /**
  * A graph edge as the server sends it (`from_id`, `to_id`, ...), with the
@@ -852,11 +908,15 @@ export class DakeraClient {
     errorMessage: string,
     code: ErrorCode
   ): DakeraError {
+    // The server's own message when it sent one (a 429 names the rate limit or,
+    // v0.12.3+, the admission queue that is full), else a generic text.
+    const serverOr = (generic: string): string =>
+      errorMessage === `HTTP ${response.status}` || errorMessage.trim() === '' ? generic : errorMessage;
     switch (response.status) {
       case 400:
         return new ValidationError(errorMessage, response.status, body, code);
       case 401:
-        return new AuthenticationError('Authentication failed', response.status, body, code);
+        return new AuthenticationError(serverOr('Authentication failed'), response.status, body, code);
       case 403:
         return new AuthorizationError(errorMessage, response.status, body, code);
       case 404:
@@ -869,7 +929,7 @@ export class DakeraClient {
         return new NotImplementedError(errorMessage, response.status, body, code);
       case 429:
         return new RateLimitError(
-          'Rate limit exceeded',
+          serverOr('Rate limit exceeded'),
           response.status,
           body,
           parseRetryAfter(response.headers.get('Retry-After')),
@@ -1936,9 +1996,29 @@ export class DakeraClient {
   // Memory Operations
   // ===========================================================================
 
-  /** Store a memory for an agent */
+  /**
+   * Store a memory for an agent (`POST /v1/memory/store`).
+   *
+   * Server v0.12.3+: `event_time` dates the memory by when its event happened
+   * ({@link EventTime}: Unix seconds, an RFC 3339 string or a `Date`); the
+   * response carries a truncation report (`truncated`, `content_tokens`,
+   * `embedded_tokens`, `max_tokens`, `windows`) when the content is longer
+   * than the embedding model reads, and `warnings` when the server ignored a
+   * request field. All of them are absent on older servers.
+   *
+   * @example
+   * ```ts
+   * const res = await client.storeMemory('agent-1', {
+   *   content: 'We moved the launch to Friday.',
+   *   event_time: new Date('2023-05-20T02:21:00Z'),
+   * });
+   * if (res.truncated) console.warn(`only ${res.embedded_tokens}/${res.content_tokens} tokens embedded`);
+   * ```
+   */
   async storeMemory(agentId: string, request: StoreMemoryRequest): Promise<StoreMemoryResponse> {
-    return this.request<StoreMemoryResponse>('POST', '/v1/memory/store', { ...request, agent_id: agentId });
+    const body = memoryWriteBody(request, 'event_time');
+    body.agent_id = agentId;
+    return this.request<StoreMemoryResponse>('POST', '/v1/memory/store', body);
   }
 
   /**
@@ -2002,18 +2082,37 @@ export class DakeraClient {
     return response;
   }
 
-  /** Get a specific memory */
-  async getMemory(agentId: string, memoryId: string): Promise<Memory> {
-    return this.request<Memory>('GET', `/v1/memory/get/${encodeURIComponent(memoryId)}?agent_id=${encodeURIComponent(agentId)}`);
+  /**
+   * Get a specific memory (`GET /v1/memory/get/{id}`).
+   *
+   * `getMemory(agentId, memoryId)` reads it from that agent. Server v0.12.3+
+   * also takes the id alone — `getMemory(memoryId)` or
+   * `getMemory(undefined, memoryId)` — and looks in every agent namespace the
+   * key may read: one holder returns it, none is a 404 (`NotFoundError`),
+   * several agents holding the id is a 400 (`ValidationError`) asking for
+   * `agent_id`. An older server needs the agent id.
+   */
+  async getMemory(memoryId: string): Promise<Memory>;
+  async getMemory(agentId: string | undefined, memoryId: string): Promise<Memory>;
+  async getMemory(agentIdOrMemoryId: string | undefined, memoryId?: string): Promise<Memory> {
+    const [agentId, id] =
+      memoryId === undefined ? [undefined, agentIdOrMemoryId] : [agentIdOrMemoryId, memoryId];
+    if (typeof id !== 'string' || id === '') {
+      throw new ValidationError('getMemory needs a memory id', undefined, undefined, ErrorCode.INVALID_REQUEST);
+    }
+    const query = agentId === undefined || agentId === null ? '' : `?agent_id=${encodeURIComponent(agentId)}`;
+    return this.request<Memory>('GET', `/v1/memory/get/${encodeURIComponent(id)}${query}`);
   }
 
   /**
    * Update an existing memory (`PUT /v1/memory/update/{id}?agent_id=...`). The
    * server requires `agent_id` in the query string and answers with the updated
-   * `Memory`.
+   * `Memory`; server v0.12.3+ adds the truncation report (`truncated`,
+   * `content_tokens`, ...) when the new content was re-embedded and is longer
+   * than the embedding model reads.
    */
-  async updateMemory(agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<Memory> {
-    return this.request<Memory>(
+  async updateMemory(agentId: string, memoryId: string, request: UpdateMemoryRequest): Promise<UpdateMemoryResponse> {
+    return this.request<UpdateMemoryResponse>(
       'PUT',
       `/v1/memory/update/${encodeURIComponent(memoryId)}?agent_id=${encodeURIComponent(agentId)}`,
       request
@@ -2083,7 +2182,41 @@ export class DakeraClient {
    * ```
    */
   async storeMemoriesBatch(request: BatchStoreMemoryRequest): Promise<BatchStoreMemoryResponse> {
-    return this.request<BatchStoreMemoryResponse>('POST', '/v1/memories/store/batch', request);
+    const body: Record<string, unknown> = { ...request };
+    if (Array.isArray(request.memories)) {
+      body.memories = request.memories.map((item, i) => memoryWriteBody(item, `memories[${i}].event_time`));
+    }
+    return this.request<BatchStoreMemoryResponse>('POST', '/v1/memories/store/batch', body);
+  }
+
+  /**
+   * List an agent's memories that deduplication or consolidation deleted and
+   * that can still be restored (`GET /v1/memory/deduplicated?agent_id=`,
+   * server v0.12.3+, read scope). Newest first; each names its `kind`
+   * (`deduplication` | `consolidation`), the `survivor_id` it was folded or
+   * merged into, and `restorable_until` (the server's
+   * `DAKERA_AUTOPILOT_TRASH_RETENTION_HOURS`, default 168 h).
+   */
+  async listDeduplicated(agentId: string): Promise<DeduplicatedListResponse> {
+    return this.request<DeduplicatedListResponse>(
+      'GET',
+      `/v1/memory/deduplicated?agent_id=${encodeURIComponent(agentId)}`,
+    );
+  }
+
+  /**
+   * Put back a memory deduplication or consolidation deleted, exactly as it
+   * was stored, under its own id (`POST /v1/memory/deduplicated/{id}/restore`,
+   * server v0.12.3+, write scope). Returns the restored memory.
+   *
+   * @throws {@link NotFoundError} (404) when it has no restorable copy.
+   * @throws {@link ConflictError} (409) when the agent holds that id again.
+   */
+  async restoreDeduplicated(agentId: string, memoryId: string): Promise<Memory> {
+    return this.request<Memory>(
+      'POST',
+      `/v1/memory/deduplicated/${encodeURIComponent(memoryId)}/restore?agent_id=${encodeURIComponent(agentId)}`,
+    );
   }
 
   // ===========================================================================
@@ -3297,8 +3430,8 @@ export class DakeraClient {
    * above, nothing applied): the server-wide idle timeout after which open
    * sessions without their own timeout are ended.
    */
-  async updateConfig(config: AdminConfig | Record<string, unknown>): Promise<AdminConfig> {
-    return this.request<AdminConfig>('PUT', '/v1/admin/config', config);
+  async updateConfig(config: AdminConfig | Record<string, unknown>): Promise<AdminConfigUpdateResponse> {
+    return this.request<AdminConfigUpdateResponse>('PUT', '/v1/admin/config', config);
   }
 
   /** Get quota settings */
@@ -3397,9 +3530,27 @@ export class DakeraClient {
     return this.request<AutoPilotStatusResponse>('GET', '/v1/admin/autopilot/status');
   }
 
-  /** Update AutoPilot configuration at runtime (PILOT-2) */
+  /**
+   * Update AutoPilot configuration at runtime (PILOT-2). Only the fields that
+   * are set are sent. Server v0.12.3+ also takes `dedup_mode` (`off` |
+   * `report` | `merge`; another value throws a `ValidationError` before
+   * sending), `dedup_cross_session`, `consolidate_cross_session` and
+   * `trash_retention_hours`; an older server ignores them.
+   */
   async autopilotUpdateConfig(request: AutoPilotConfigRequest): Promise<AutoPilotConfigResponse> {
-    return this.request<AutoPilotConfigResponse>('PUT', '/v1/admin/autopilot/config', request);
+    if (request.dedup_mode !== undefined && !AUTOPILOT_DEDUP_MODES.includes(request.dedup_mode)) {
+      throw new ValidationError(
+        `dedup_mode must be one of ${AUTOPILOT_DEDUP_MODES.join(', ')} (got '${String(request.dedup_mode)}')`,
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(request)) {
+      if (value !== undefined) body[key] = value;
+    }
+    return this.request<AutoPilotConfigResponse>('PUT', '/v1/admin/autopilot/config', body);
   }
 
   /** Manually trigger an AutoPilot dedup or consolidation cycle (PILOT-3) */

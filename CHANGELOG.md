@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.3] - Unreleased
+## [0.12.3] - 2026-10-22
 
-Server v0.12.3 support (Dakera-AI/dakera#917, #920) and an SDK security / robustness audit. Compatible
+Server v0.12.3 support (Dakera-AI/dakera#917, #920, #930, #932, #933, #938) and an SDK security / robustness audit. Compatible
 with v0.12.0–v0.12.2 servers: the new request fields are left out when unset (older servers ignore them), the
 new response fields are optional; the new features need a v0.12.3+ server.
 
@@ -28,6 +28,40 @@ new response fields are optional; the new features need a v0.12.3+ server.
   `capabilities().documents` (`DocumentCapabilities`). Import requests are strict (unknown fields and
   chunking options throw a `ValidationError` before sending); a pre-v0.12.3 server's 404 is reported as
   "needs Dakera server v0.12.3+". The request helper accepts an `AbortSignal` internally.
+- **`event_time`** (server v0.12.3+, Dakera-AI/dakera#932) on `StoreMemoryRequest` and
+  `BatchStoreMemoryItem`: `EventTime` = Unix seconds, an RFC 3339 string or a `Date` (sent as its ISO
+  string); not sent when unset. The server stores it as metadata `_dakera_event_time` and reads it for
+  recency, `since` / `until` and the temporal edges. A `NaN` / infinite number or an invalid `Date` throws a
+  `ValidationError` before sending; the bounds are the server's (400 naming the field,
+  `memories[i].event_time` in a batch). `StoreMemoryRequest.id` (custom id) is now typed.
+- **Truncation report** (Dakera-AI/dakera#933): `StoreMemoryResponse` and the new `UpdateMemoryResponse`
+  (`updateMemory()`, still the memory's fields) gain the optional `truncated`, `content_tokens`,
+  `embedded_tokens`, `max_tokens`, `tokens_estimated`, `windows` (`EmbedTruncationReport`);
+  `BatchStoreMemoryResponse.truncated` lists `TruncatedMemory` entries.
+- **`warnings`** (Dakera-AI/dakera#938) on `StoreMemoryResponse`, `BatchStoreMemoryResponse`,
+  `RecallResponse` and `BatchRecallResponse`: the request fields the server ignored.
+- **Deduplicated memories** (Dakera-AI/dakera#930): `listDeduplicated(agentId)`
+  (`GET /v1/memory/deduplicated`, `DeduplicatedListResponse` / `DeduplicatedMemory` / `DeduplicatedKind`)
+  and `restoreDeduplicated(agentId, memoryId)` (`POST /v1/memory/deduplicated/{id}/restore`, path-escaped id;
+  404 → `NotFoundError`, 409 → `ConflictError`; never retried).
+- **Autopilot** (Dakera-AI/dakera#930): `AutoPilotConfig` and `AutoPilotConfigRequest` gain `dedup_mode`
+  (`AutoPilotDedupMode`, `AUTOPILOT_DEDUP_MODES`; an unknown mode throws a `ValidationError` before sending),
+  `dedup_cross_session`, `consolidate_cross_session`, `trash_retention_hours`; `autopilotUpdateConfig()` sends
+  only the fields that are set. `AutoPilotDedupResult` gains `duplicates_found` and `mode`,
+  `DedupResultSnapshot` gains `duplicates_found`, `AdminConfig` the `autopilot_dedup_mode`,
+  `autopilot_dedup_cross_session`, `autopilot_consolidate_cross_session`, `autopilot_trash_retention_hours`
+  overrides.
+- `getMemory(memoryId)` / `getMemory(undefined, memoryId)` without an agent id (server v0.12.3+,
+  Dakera-AI/dakera#938); `getMemory(agentId, memoryId)` is unchanged.
+- `capabilities().naming` gains `session_id_pattern` and `session_id_max_bytes` (session ids may contain
+  `:`). `AuditEvent.reason` and `MemoryEvent.reason`; the constants `AUDIT_EVENT_DEDUPLICATED`,
+  `AUDIT_EVENT_CONSOLIDATED`, `AUDIT_EVENT_RESTORED`.
+- `ErrorCode` gains `HOST_NOT_ALLOWED` (421), `UNPROCESSABLE_CONTENT` (422) and `EXTRACTION_TIMEOUT` (504),
+  so a failed document job reports its typed code.
+- `RecalledMemory.rank_score` (Dakera-AI/dakera#940): the server's ranking field, non-increasing over a
+  recall's `memories`; `score` takes it when present. `RerankReport.capped` (Dakera-AI/dakera#926).
+- `Memory` types the server's `agent_id`, `session_id`, `tags`, `last_accessed_at`, `ttl_seconds`,
+  `expires_at` and `attachment_ref`.
 - `MemoryType` gains `working` (a server type the SDK did not list).
 - `recall()` options **`neighborhood_mode`** (`'inline' | 'separate' | 'off'`, `NeighborhoodMode`,
   `NEIGHBORHOOD_MODES`, `isNeighborhoodMode()`) and **`include_summaries`**; an unknown mode throws a
@@ -83,6 +117,15 @@ new response fields are optional; the new features need a v0.12.3+ server.
 - `createNamespace()` no longer sends `index_type` / `metadata` (not server fields).
 - `ChatMemorySession.recall()` asks for `neighborhood_mode: "separate"`, so `topK` is the maximum it
   returns.
+- The deprecated `StoreMemoryRequest.valid_from` is sent as `metadata.valid_from`, where the server reads
+  it (an explicit `metadata.valid_from` wins); at the top level no server ever read it. The deprecated
+  `embedding` is not a server field (a v0.12.3 server lists it in `warnings`).
+- `updateConfig()` returns `AdminConfigUpdateResponse`: the server's `{ success, config, message,
+  warnings }` (it was typed as the configuration itself).
+- A 401 or 429 error keeps the server's message (a v0.12.3 overload 429 names the full queue) instead of a
+  fixed text; the code, `details` and `Retry-After` were already kept.
+- Server v0.12.3 answers `recall()`, `searchMemories()` and `batchRecall()` for an agent that has stored
+  nothing with no memories (older servers: 404 `NAMESPACE_NOT_FOUND`). No SDK code depended on that 404.
 - `sseUrl()` is deprecated: a key in a URL ends up in logs and browser history.
 
 ### Fixed

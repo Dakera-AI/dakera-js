@@ -147,6 +147,34 @@ optional. The features below need a **v0.12.3+** server.
 - `RecallResponse` now also returns the server's `query_embedding_time_ms`, `search_time_ms`,
   `rerank_report` and `late_interaction_first_stage`; `fusion` defaults to `minmax`, and the `rerank`
   pool is 10x the ranking depth `max(top_k, 10)` on hybrid routing.
+- **`rank_score`** on recall results — the server's ranking field, non-increasing over `memories` in response
+  order: sort or threshold on it. `RecalledMemory.score` is `rank_score` when the server sends it.
+- **`event_time`** on `storeMemory()` and on each `storeMemoriesBatch()` item — when the memory's event
+  happened, as Unix seconds, an RFC 3339 string or a `Date` (sent as its ISO string). The server records it as
+  metadata `_dakera_event_time`; recency, `since` / `until` and the temporal graph edges read it instead of the
+  ingest time (`created_at` stays the ingest time). Bounds are checked by the server (400 naming the field).
+- **Truncation report** — when a text is longer than the embedding model reads, `storeMemory()` and
+  `updateMemory()` answer `truncated: true` with `content_tokens`, `embedded_tokens`, `max_tokens`, `windows`
+  (and `tokens_estimated`); `storeMemoriesBatch()` lists such memories in `truncated: [{ id, ... }]`.
+- **`warnings`** on store, batch store, recall and batch recall responses: request fields the server ignored.
+  The SDK sends only fields the server knows (the deprecated `valid_from` now goes to `metadata.valid_from`,
+  where the server reads it; the deprecated `embedding` is not a server field and is reported there).
+- **Deduplicated memories** — `listDeduplicated(agentId)` lists memories deduplication or consolidation
+  deleted that can still be restored (`kind`, `survivor_id`, `restorable_until`); `restoreDeduplicated(agentId,
+  memoryId)` puts one back (`NotFoundError` without a restorable copy, `ConflictError` when the agent holds the id
+  again). Audit events (`listAuditEvents()`) and memory events carry `reason`; the new audit event types are
+  `deduplicated`, `consolidated` and `restored`.
+- **Autopilot** — status and `autopilotUpdateConfig()` gain `dedup_mode` (`off` | `report` | `merge`; the server
+  default is now `off`), `dedup_cross_session`, `consolidate_cross_session` and `trash_retention_hours`; the
+  trigger's `dedup` result gains `duplicates_found` and `mode`; `getConfig()` shows the `autopilot_*`
+  overrides once set. `updateConfig()` is typed as the server's `{ success, config, message, warnings }`.
+- **`getMemory(memoryId)`** without an agent id: the server looks in every agent the key may read (several
+  holders → `ValidationError` asking for the agent). `getMemory(agentId, memoryId)` is unchanged.
+- **Behaviour change:** `recall()`, `searchMemories()` and `batchRecall()` for an agent that has stored nothing
+  answer with no memories (an older server answered 404 `NAMESPACE_NOT_FOUND`). Session ids may contain `:`
+  (`capabilities().naming.session_id_pattern`). New error codes `HOST_NOT_ALLOWED` (421, a `Host` the server
+  does not answer for while authentication is off), `UNPROCESSABLE_CONTENT` (422) and `EXTRACTION_TIMEOUT`
+  (504); a 401 or 429 error keeps the server's own message.
 - **Strict admin bodies** — `POST /admin/keys`, `POST /v1/namespaces/{ns}/keys`, `POST /admin/backups` and
   `POST /admin/encryption/rotate-key` answer **422** to an unknown field. `createKey()`,
   `createNamespaceKey()`, `adminCreateBackup()` and `rotateEncryptionKey()` send only the fields the server
