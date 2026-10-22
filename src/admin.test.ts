@@ -72,21 +72,24 @@ describe('Admin Methods', () => {
   describe('adminCreateBackup', () => {
     it('should create a backup', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        id: 'bk-new',
-        status: 'in_progress',
-        created_at: 1700002000,
+        backup: { backup_id: 'bk-new', name: 'pre-deploy', status: 'in_progress', created_at: 1700002000 },
       }));
 
-      const result = await client.adminCreateBackup({ label: 'pre-deploy', namespaces: ['ns-a'] });
+      const result = await client.adminCreateBackup({ name: 'pre-deploy', namespaces: ['ns-a'] });
 
-      expect(result.id).toBe('bk-new');
-      expect(result.status).toBe('in_progress');
+      expect((result.backup as unknown as { backup_id: string }).backup_id).toBe('bk-new');
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/admin/backups');
       expect(opts.method).toBe('POST');
       const body = JSON.parse(opts.body as string);
-      expect(body.label).toBe('pre-deploy');
-      expect(body.namespaces).toEqual(['ns-a']);
+      expect(body).toEqual({ name: 'pre-deploy', namespaces: ['ns-a'] });
+    });
+
+    it('refuses a field the server does not accept, before sending', async () => {
+      await expect(
+        client.adminCreateBackup({ name: 'x', label: 'pre-deploy' } as never),
+      ).rejects.toThrow(/does not accept the field 'label'/);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -223,7 +226,10 @@ describe('Admin Methods', () => {
         headers: new Headers(),
       });
 
-      await expect(client.adminDownloadBackup('bk-missing')).rejects.toThrow('Download failed: 404');
+      await expect(client.adminDownloadBackup('bk-missing')).rejects.toMatchObject({
+        name: 'NotFoundError',
+        statusCode: 404,
+      });
     });
   });
 
@@ -254,7 +260,10 @@ describe('Admin Methods', () => {
       });
 
       const data = new ArrayBuffer(8);
-      await expect(client.adminUploadBackup(data)).rejects.toThrow('Upload failed: 413');
+      await expect(client.adminUploadBackup(data)).rejects.toMatchObject({
+        name: 'PayloadTooLargeError',
+        statusCode: 413,
+      });
     });
   });
 

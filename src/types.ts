@@ -435,14 +435,42 @@ export interface RetryConfig {
 export interface ClientOptions {
   /** Base URL of the Dakera server */
   baseUrl: string;
-  /** API key for authentication */
+  /**
+   * API key for authentication, sent as `Authorization: Bearer <key>` (never
+   * in a URL). The client keeps it in a private field: it does not appear in
+   * `JSON.stringify(client)`, `console.log(client)` or in any error the SDK
+   * throws.
+   *
+   * **Browsers:** a key given to code running in a browser is readable by
+   * anyone who can open the page (devtools, extensions, XSS). Keep keys on a
+   * server: call Dakera from your backend, or put a proxy in front that adds
+   * the key server-side (the Dakera dashboard does this), and construct the
+   * browser client without `apiKey`.
+   */
   apiKey?: string;
-  /** Per-request timeout in milliseconds (default: 30000) */
+  /**
+   * Timeout in milliseconds for one attempt of a request, from sending it to
+   * reading the whole response body (default: 30000). On expiry the request is
+   * aborted (AbortController) and a `TimeoutError` is thrown.
+   */
   timeout?: number;
-  /** Connection establishment timeout in milliseconds. Defaults to `timeout`. */
+  /**
+   * Bound in milliseconds for one attempt when shorter than `timeout`. `fetch`
+   * has no separate connect phase, so the shorter of the two bounds the whole
+   * attempt. Defaults to `timeout`.
+   */
   connectTimeout?: number;
-  /** Maximum number of retries for transient errors (default: 3).
-   *  Ignored when `retryBackoff` is provided. */
+  /**
+   * Maximum number of attempts per request (default: 3). Ignored when
+   * `retryBackoff` is provided.
+   *
+   * Only safe retries are made: a 429, and a 503 (both mean the server did not
+   * process the request), are retried for every method, honouring
+   * `Retry-After` (capped at 60 s); other 5xx answers, timeouts and network
+   * errors are retried only for idempotent requests (GET, HEAD, PUT, DELETE,
+   * and read-only POST routes such as recall, search and query). Other 4xx
+   * answers and 501 are never retried.
+   */
   maxRetries?: number;
   /** Fine-grained retry and backoff configuration.
    *  When provided, `maxRetries` is ignored in favour of `retryBackoff.maxRetries`. */
@@ -450,7 +478,9 @@ export interface ClientOptions {
   /** Additional headers */
   headers?: Record<string, string>;
   /** Base URL of the dakera-ode sidecar (e.g. `"http://localhost:8080"`).
-   *  Required to call {@link DakeraClient.extractEntities}. */
+   *  Required to call {@link DakeraClient.extractEntities}.
+   *  Note: requests to the ODE sidecar currently carry the Dakera API key
+   *  (`Authorization` header); tracked in https://github.com/Dakera-AI/dakera/issues/924. */
   odeUrl?: string;
   /**
    * R9: validate the requested embedding model, index kind and distance metric
@@ -652,8 +682,65 @@ export interface ConfigureNamespaceResponse {
 // Memory Types
 // =============================================================================
 
-/** Memory type classification */
-export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'strategic';
+/**
+ * Memory type classification. The server knows `episodic` (its default),
+ * `semantic`, `procedural` and `working`; `strategic` is kept for source
+ * compatibility but the server refuses it.
+ */
+export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'working' | 'strategic';
+
+/**
+ * When a memory's event happened (server v0.12.3+, `event_time` on
+ * `POST /v1/memory/store` and on each `POST /v1/memories/store/batch` item):
+ *
+ * - a `number`: Unix **seconds** (a fractional part is dropped by the server;
+ *   milliseconds are refused with a 400),
+ * - a `string`: an RFC 3339 timestamp such as `2023-05-20T02:21:00Z`,
+ * - a `Date`: sent as its ISO 8601 / RFC 3339 string (`toISOString()`).
+ *
+ * The bounds (1970 to 2286; a future time is accepted) are the server's: an
+ * out-of-range value is a 400 naming the field. The SDK only refuses values
+ * that are not a time at all (`NaN`, an invalid `Date`).
+ */
+export type EventTime = number | string | Date;
+
+/**
+ * How the embedding model cut a memory's text (server v0.12.3+,
+ * Dakera-AI/dakera#933): the vector covers its first `embedded_tokens` only.
+ * Flattened into the store and update responses; every field is absent when
+ * the model reads the whole text (and on older servers).
+ */
+export interface EmbedTruncationReport {
+  /** `true` when the text is longer than the embedding model reads. */
+  truncated?: boolean;
+  /** Tokens of the whole text (document prefix and special tokens included). */
+  content_tokens?: number;
+  /** Tokens the model embedded: the vector covers this prefix of the text. */
+  embedded_tokens?: number;
+  /** The model's token cap (`effective_max_seq_length` in `capabilities()`). */
+  max_tokens?: number;
+  /** The counts are the server's model-free estimate (the model is not loaded on that node). Absent = false. */
+  tokens_estimated?: boolean;
+  /**
+   * Overlapping windows of the text derived as sub-memories so its tail is
+   * searchable (`DAKERA_LONG_CONTENT_WINDOWS`); `0` with that switch off.
+   */
+  windows?: number;
+}
+
+/** One memory of a batch whose text the embedding model cut (`BatchStoreMemoryResponse.truncated`). */
+export interface TruncatedMemory {
+  /** The memory's id. */
+  id: MemoryId;
+  /** Always `true`. */
+  truncated: boolean;
+  content_tokens: number;
+  embedded_tokens: number;
+  max_tokens: number;
+  /** Absent = false. */
+  tokens_estimated?: boolean;
+  windows: number;
+}
 
 /** Request to store a memory */
 export interface StoreMemoryRequest {
@@ -680,12 +767,36 @@ export interface StoreMemoryRequest {
   session_id?: string;
   /** Optional tags to associate with the memory */
   tags?: string[];
-  /** Pre-computed embedding */
+  /**
+   * Optional custom memory id (the server generates one when omitted). A
+   * re-store of an existing id is a full replacement.
+   */
+  id?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#932): when the memory's event HAPPENED,
+   * for a client that writes history (an import, a backfill, a replayed
+   * conversation). See {@link EventTime}. The server records it as the
+   * server-owned metadata key `_dakera_event_time` (integer Unix seconds, also
+   * the event date `_dakera_content_date` unless the metadata names one);
+   * recency, `since` / `until`, the query-inferred time range and the
+   * temporal graph edges then read it instead of the ingest time.
+   * `created_at` stays the ingest time (TTL and decay count from it). Out of
+   * the server's bounds (before 1970, after 2286): 400 naming the field. A
+   * client cannot set `_dakera_event_time` in `metadata` itself. Not sent when
+   * undefined; older servers ignore it.
+   */
+  event_time?: EventTime;
+  /**
+   * @deprecated No server reads a pre-computed embedding on a memory store
+   * (the server embeds `content` itself), so the SDK does not send it.
+   */
   embedding?: number[];
   /**
-   * Bi-temporal validity start — Unix timestamp (seconds) indicating when this
-   * memory becomes temporally valid. Defaults to ingest time when omitted.
-   * Used by temporal recall queries (server v0.11.98+, DAK-7424).
+   * @deprecated Use {@link StoreMemoryRequest.event_time}. Bi-temporal validity
+   * start (Unix seconds). The server reads it from the memory's metadata, not
+   * from the request, so the SDK sends it as `metadata.valid_from` (an explicit
+   * `metadata.valid_from` wins). Before 0.12.3 the SDK sent it at the top level,
+   * where no server read it.
    */
   valid_from?: number;
   /**
@@ -722,6 +833,20 @@ export interface Memory {
   updated_at?: string;
   /** Access count */
   access_count?: number;
+  /** The agent the memory belongs to. */
+  agent_id?: string;
+  /** The memory's session, when it has one. */
+  session_id?: string;
+  /** The memory's tags. */
+  tags?: string[];
+  /** Last access (Unix seconds). */
+  last_accessed_at?: number;
+  /** Time to live in seconds, when set. */
+  ttl_seconds?: number;
+  /** Expiry (Unix seconds), when set. */
+  expires_at?: number;
+  /** v0.12: the memory's attachment reference, when it has one. */
+  attachment_ref?: string;
   /**
    * Server v0.12.2+, listings asked with `content_preview_chars` only: length
    * of the FULL content in characters (Unicode scalar values).
@@ -745,9 +870,17 @@ export interface RecalledMemory {
   memory_type: string;
   /** Importance score */
   importance: number;
-  /** Ranking score — equals smart_score when present, then weighted_score, then raw score. */
+  /**
+   * Ranking score — the server's `rank_score` when present (v0.12.3+: non-increasing over a
+   * recall's results, in order), else smart_score, then weighted_score, then raw score.
+   */
   score: number;
-  /** Raw smart_score from the server (the primary ranking key). */
+  /**
+   * The server's ranking field (recall, v0.12.3+, #940): non-increasing over `memories` in
+   * response order — sort or threshold on this. Absent from older servers and from search.
+   */
+  rank_score?: number;
+  /** Raw smart_score from the server. */
   smart_score?: number;
   /** Raw weighted_score from the server. */
   weighted_score?: number;
@@ -771,14 +904,221 @@ export interface RecalledMemory {
    * cut preview (read the whole memory with `getMemory()` when true).
    */
   content_truncated?: boolean;
+  /**
+   * Server v0.12.3+: when derived sentence sub-memories are collapsed into
+   * their source (server flag `DAKERA_RECALL_COLLAPSE_DERIVED`, default off),
+   * the best-matching sentence, set when it outranked the source's own text.
+   * The result itself (`id`, `content`) is then the source memory. Absent on
+   * older servers and when nothing was collapsed.
+   */
+  matched_text?: string;
+  /**
+   * Server v0.12.3+: ids of the sentence sub-memories collapsed into this
+   * result, best first. Absent when none matched (and on older servers).
+   */
+  matched_ids?: string[];
+  /**
+   * Server v0.12.3+: how the item got into the response when it is not a
+   * ranked result — `"neighborhood"` for neighbourhood context returned inline
+   * (`neighborhood_mode: "inline"`, after the `top_k` ranked results). Its
+   * `score` is then the raw similarity of a different search and is NOT
+   * comparable with the ranked results' scores. Absent on ranked results.
+   */
+  retrieval?: RecallRetrieval;
+  /**
+   * Server v0.12.3+: on a {@link RecallResponse.context_memories} entry,
+   * the id of the ranked memory it is context for.
+   */
+  context_of?: MemoryId;
+}
+
+/**
+ * Where a recall returns its neighbourhood context (session-adjacent memories
+ * of the top results), server v0.12.3+ (`neighborhood_mode`):
+ *
+ * - `inline`: appended to `memories` after the `top_k` ranked results, each
+ *   marked `retrieval: "neighborhood"` (the v0.11/v0.12 behaviour, and the
+ *   server default unless `DAKERA_NEIGHBORHOOD_MODE` says otherwise);
+ * - `separate`: `memories` holds at most `top_k` results and the context comes
+ *   back in `context_memories`, each entry with `context_of`;
+ * - `off`: no neighbourhood context.
+ *
+ * `neighborhood: false` still means `off` and wins over this field. Older
+ * servers ignore the field (they behave as `inline`).
+ */
+export type NeighborhoodMode = 'inline' | 'separate' | 'off';
+/** Every {@link NeighborhoodMode}. */
+export const NEIGHBORHOOD_MODES: readonly NeighborhoodMode[] = ['inline', 'separate', 'off'];
+/** Whether `value` is a {@link NeighborhoodMode}. */
+export function isNeighborhoodMode(value: unknown): value is NeighborhoodMode {
+  return (NEIGHBORHOOD_MODES as readonly unknown[]).includes(value);
+}
+
+/**
+ * `RecalledMemory.retrieval`: `"neighborhood"` today; kept open for newer
+ * server strings.
+ */
+export type RecallRetrieval = 'neighborhood' | (string & {});
+
+/** What the cross-encoder did for one recall or search (server v0.12+). */
+export interface RerankReport {
+  /** The cross-encoder rescored candidates and its order was used. */
+  applied: boolean;
+  /** How many candidates it scored. */
+  candidates: number;
+  /**
+   * Why it did not run (`disabled`, `bm25_routing`, `visual_lane`,
+   * `no_candidates`, `no_query`, `unavailable`, `failed`), or why its order was
+   * not used (`low_confidence`). Absent when it ran and was used.
+   */
+  skipped?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#926): `true` when the server's candidate
+   * cap (`DAKERA_RERANK_MAX_CANDIDATES`) left part of the pool unscored, or
+   * lowered the request's `rerank_candidates` to it. Absent otherwise.
+   */
+  capped?: boolean;
+}
+
+/**
+ * Options of {@link DakeraClient.recall} (`POST /v1/memory/recall`). Every
+ * field is optional and left out of the request when `undefined`, so the
+ * server default applies.
+ */
+export interface MemoryRecallOptions {
+  /** v0.12: language of `query` (see {@link RecallRequest.lang}). */
+  lang?: string;
+  /**
+   * Number of ranked results (server default 10). The ranking of the first `k`
+   * results does not depend on `top_k` for `k <= 10` (server v0.12.3+).
+   * Under `neighborhood_mode: "inline"` (the default) neighbourhood context is
+   * appended AFTER these `top_k` results, so `memories` can be longer; ask for
+   * `neighborhood_mode: "separate"` when `top_k` must be the maximum number of
+   * results.
+   */
+  top_k?: number;
+  /** Filter by memory type. */
+  memory_type?: string;
+  /** Recall within one session only. */
+  session_id?: string;
+  /** Only memories carrying these tags. */
+  tags?: string[];
+  /** Minimum importance threshold. */
+  min_importance?: number;
+  /** Importance-weighted re-ranking (server default `true`). */
+  importance_weighted?: boolean;
+  /** COG-2: include KG-linked memories in `associated_memories` (default false). */
+  include_associated?: boolean;
+  /** COG-2: max associated memories (default 10, max 10). */
+  associated_memories_cap?: number;
+  /** KG-3: traversal depth 1–3 (default 1); requires `include_associated`. */
+  associated_memories_depth?: number;
+  /** KG-3: minimum edge weight for KG traversal (default 0.0). */
+  associated_memories_min_weight?: number;
+  /** CE-7: only memories created at or after this ISO-8601 timestamp. */
+  since?: string;
+  /** CE-7: only memories created at or before this ISO-8601 timestamp. */
+  until?: string;
+  /** CE-10: retrieval routing mode (server default `auto`). */
+  routing?: RoutingMode;
+  /**
+   * CE-13: rescore the candidate pool with the cross-encoder (server default
+   * `true`). The pool is sized from the ranking depth (`max(top_k, 10)`): on
+   * hybrid routing 10x that depth (not `top_k * 3`).
+   */
+  rerank?: boolean;
+  /** Rerank at most this many candidates (server default: the whole pool). */
+  rerank_candidates?: number;
+  /** CE-14: fusion when routing is hybrid (server default `minmax`, not `rrf`). */
+  fusion?: FusionStrategy;
+  /** CE-17: explicit vector weight for hybrid routing (0.0–1.0). */
+  vector_weight?: number;
+  /** CE-23: pseudo-relevance feedback passes (1–3, default 1). */
+  iterations?: number;
+  /**
+   * v0.11: fetch session-adjacent memories of the top results as context
+   * (server default `true`). `false` means no neighbourhood whatever
+   * `neighborhood_mode` says.
+   */
+  neighborhood?: boolean;
+  /**
+   * Server v0.12.3+: where the neighbourhood context goes — see
+   * {@link NeighborhoodMode}. Omitted: the server default
+   * (`DAKERA_NEIGHBORHOOD_MODE`, default `inline`).
+   */
+  neighborhood_mode?: NeighborhoodMode;
+  /**
+   * Server v0.12.3+: whether session-summary memories may be recalled.
+   * Omitted: the server's choice (`DAKERA_RECALL_EXCLUDE_SUMMARIES`, default:
+   * they may).
+   */
+  include_summaries?: boolean;
 }
 
 /** COG-2 / KG-3: Response from the recall endpoint with optional associative memories */
 export interface RecallResponse {
-  /** Primary recalled memories */
+  /**
+   * Ranked memories (at most `top_k`), followed under
+   * `neighborhood_mode: "inline"` by neighbourhood context items, each with
+   * `retrieval: "neighborhood"`.
+   */
   memories: RecalledMemory[];
   /** COG-2 / KG-3: KG associated memories at configurable depth (only present when include_associated was true) */
   associated_memories?: RecalledMemory[];
+  /**
+   * Server v0.12.3+, `neighborhood_mode: "separate"` only: neighbourhood
+   * context of the ranked results, each entry with `context_of` (the ranked
+   * memory it belongs to) and `retrieval: "neighborhood"`. Absent otherwise
+   * and on older servers.
+   */
+  context_memories?: RecalledMemory[];
+  /** Query embedding time in milliseconds. */
+  query_embedding_time_ms?: number;
+  /** Search time in milliseconds. */
+  search_time_ms?: number;
+  /** v0.12: what the cross-encoder did (same content as `rerank_report`). */
+  rerank?: RerankReport;
+  /** v0.12: what the cross-encoder did. */
+  rerank_report?: RerankReport;
+  /** Late-interaction strategy only: the first stage that served the recall. */
+  late_interaction_first_stage?: string;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#938): request fields the server ignored
+   * (`"unknown field 'x' ignored"`). Absent when it ignored nothing (and on
+   * older servers). The SDK sends only fields the server knows.
+   */
+  warnings?: string[];
+}
+
+/**
+ * Options of {@link DakeraClient.searchMemories} (`POST /v1/memory/search`).
+ * Undefined fields are not sent.
+ */
+export interface SearchMemoriesOptions {
+  /** v0.12: language of `query`. */
+  lang?: string;
+  /** Maximum results (server default 10; at most 500 with a query). */
+  top_k?: number;
+  /** Filter by memory type. */
+  memory_type?: string;
+  /** Only memories of this session. */
+  session_id?: string;
+  /** Only memories carrying these tags. */
+  tags?: string[];
+  /** Minimum importance. */
+  min_importance?: number;
+  /** Maximum importance. */
+  max_importance?: number;
+  /** Only memories created after this unix time (seconds). */
+  created_after?: number;
+  /** Only memories created before this unix time (seconds). */
+  created_before?: number;
+  /** Sort field: `created_at`, `last_accessed_at`, `importance`, `access_count`. */
+  sort_by?: 'created_at' | 'last_accessed_at' | 'importance' | 'access_count';
+  /** CE-10: retrieval routing mode. */
+  routing?: RoutingMode;
+  /** CE-13: cross-encoder reranking (server default `false` for search). */
+  rerank?: boolean;
 }
 
 /** Response from storing a memory.
@@ -786,9 +1126,14 @@ export interface RecallResponse {
  * The server wraps the created memory in a nested `memory` object:
  * `{"memory": {"id": "...", "agent_id": "...", ...}, "embedding_time_ms": N}`.
  */
-export interface StoreMemoryResponse {
+export interface StoreMemoryResponse extends EmbedTruncationReport {
   /** The stored memory object */
   memory: Memory;
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#938): request fields the server ignored.
+   * Absent when it ignored nothing (and on older servers).
+   */
+  warnings?: string[];
   /** Embedding latency in milliseconds */
   embedding_time_ms?: number;
   /**
@@ -799,6 +1144,14 @@ export interface StoreMemoryResponse {
    */
   session_state?: SessionState;
 }
+
+/**
+ * Answer of `PUT /v1/memory/update/{id}`: the updated memory (its fields at
+ * the top level, as before) and, server v0.12.3+, the truncation report of its
+ * new content when that content was re-embedded and is longer than the
+ * embedding model reads.
+ */
+export interface UpdateMemoryResponse extends Memory, EmbedTruncationReport {}
 
 /** Request to update a memory */
 export interface UpdateMemoryRequest {
@@ -846,10 +1199,10 @@ export function isKnownFusionStrategy(value: unknown): value is KnownFusionStrat
   return (KNOWN_FUSION_STRATEGIES as readonly unknown[]).includes(value);
 }
 
-export interface RecallRequest {
+export interface RecallRequest extends MemoryRecallOptions {
   /** Natural language query */
   query: string;
-  /** Number of results */
+  /** Number of results (server default 10). */
   top_k?: number;
   /** Filter by memory type */
   memory_type?: string;
@@ -865,9 +1218,14 @@ export interface RecallRequest {
   associated_memories_min_weight?: number;
   /** CE-10: retrieval routing mode. Default: `"auto"` (server picks best strategy). */
   routing?: RoutingMode;
-  /** CE-13: enable cross-encoder reranking. Default: `undefined` (server uses `true` for recall). Pass `false` to disable on latency-sensitive paths. */
+  /**
+   * CE-13: enable cross-encoder reranking. Default: `undefined` (server uses
+   * `true` for recall). The candidate pool is sized from the ranking depth
+   * `max(top_k, 10)` — on hybrid routing 10x that depth, not `top_k * 3`.
+   * Pass `false` to disable on latency-sensitive paths.
+   */
   rerank?: boolean;
-  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2). */
+  /** CE-14: fusion strategy when routing=`"hybrid"`. Default: `undefined` (server uses `"minmax"` since v0.11.2; `"rrf"` is not the default). */
   fusion?: FusionStrategy;
   /** CE-17: explicit vector/BM25 weight for Hybrid routing (0.0–1.0). When set, overrides the adaptive heuristic from QueryClassifier. Omit for adaptive defaults (recommended). Only effective when `routing="hybrid"`. */
   vector_weight?: number;
@@ -1697,7 +2055,8 @@ export type DakeraEvent =
  *
  * event_type values:
  *   connected | stored | recalled | forgotten | consolidated |
- *   importance_updated | session_started | session_ended | stream_lagged
+ *   importance_updated | session_started | session_ended | stream_lagged |
+ *   deduplicated | restored (server v0.12.3+, Dakera-AI/dakera#930)
  *
  * The `connected` event is emitted immediately on stream subscription to
  * signal the connection is live. `agent_id` will be an empty string for
@@ -1720,6 +2079,13 @@ export interface MemoryEvent {
   tags?: string[];
   /** Session ID (present for session_started / session_ended events) */
   session_id?: string;
+  /**
+   * Why the event happened, when the server says: `session_ended` →
+   * `"client"` or `"idle"` (v0.12.2+); `deduplicated` →
+   * `"absorbed into <survivor>"`, `consolidated` → `"merged into <id>"`
+   * (v0.12.3+). Absent otherwise.
+   */
+  reason?: string;
 }
 
 // =============================================================================
@@ -1841,11 +2207,24 @@ export interface CacheStats {
 }
 
 /** Slow query info */
+/** One slow-query log entry (`GET /admin/slow-queries` → `queries[]`). */
 export interface SlowQuery {
-  query: string;
+  /** Entry id (server `id`). */
+  id?: string;
+  /** @deprecated Not sent by the server; see `parameters` / `query_type`. */
+  query?: string;
   duration_ms: number;
-  timestamp: string;
+  /** Unix time as the server sends it. */
+  timestamp: string | number;
   namespace?: string;
+  /** `vector_search`, `full_text_search`, `hybrid_search`, ... */
+  query_type?: string;
+  /** Query parameters the server recorded. */
+  parameters?: unknown;
+  results_count?: number;
+  vectors_scanned?: number;
+  /** Fields of newer servers. */
+  [key: string]: unknown;
 }
 
 /** Backup type. */
@@ -1882,12 +2261,33 @@ export interface BackupInfo {
 // AutoPilot Types (PILOT-1 / PILOT-2 / PILOT-3)
 // =============================================================================
 
+/**
+ * What the autopilot dedup pass does (server v0.12.3+, Dakera-AI/dakera#930):
+ * `off` (the server default since v0.12.3: no pass), `report` (finds duplicate
+ * groups and reports them, changes nothing) or `merge` (folds and deletes, the
+ * behaviour of every earlier release).
+ */
+export type AutoPilotDedupMode = 'off' | 'report' | 'merge';
+/** Every {@link AutoPilotDedupMode}. */
+export const AUTOPILOT_DEDUP_MODES: readonly AutoPilotDedupMode[] = ['off', 'report', 'merge'];
+
 /** AutoPilot configuration */
 export interface AutoPilotConfig {
   enabled: boolean;
   dedup_threshold: number;
   dedup_interval_hours: number;
   consolidation_interval_hours: number;
+  /** Server v0.12.3+: the dedup mode ({@link AutoPilotDedupMode}). Absent on older servers. */
+  dedup_mode?: AutoPilotDedupMode | (string & {});
+  /** Server v0.12.3+: whether dedup may fold memories of different sessions (default false). */
+  dedup_cross_session?: boolean;
+  /** Server v0.12.3+: whether consolidation may merge memories of different sessions (default false). */
+  consolidate_cross_session?: boolean;
+  /**
+   * Server v0.12.3+: hours a memory deleted by dedup or consolidation stays
+   * restorable ({@link DakeraClient.listDeduplicated}); `0` = no copy (hard delete).
+   */
+  trash_retention_hours?: number;
 }
 
 /** Result snapshot from a deduplication cycle */
@@ -1895,6 +2295,8 @@ export interface DedupResultSnapshot {
   namespaces_processed: number;
   memories_scanned: number;
   duplicates_removed: number;
+  /** Server v0.12.3+: duplicates the pass found (in `report` mode none is removed). */
+  duplicates_found?: number;
 }
 
 /** Result snapshot from a consolidation cycle */
@@ -1922,6 +2324,14 @@ export interface AutoPilotConfigRequest {
   dedup_threshold?: number;
   dedup_interval_hours?: number;
   consolidation_interval_hours?: number;
+  /** Server v0.12.3+: `off`, `report` or `merge`. */
+  dedup_mode?: AutoPilotDedupMode;
+  /** Server v0.12.3+: let dedup fold memories of different sessions. */
+  dedup_cross_session?: boolean;
+  /** Server v0.12.3+: let consolidation merge memories of different sessions. */
+  consolidate_cross_session?: boolean;
+  /** Server v0.12.3+: hours a deleted memory stays restorable (0..=8760; 0 = no copy). */
+  trash_retention_hours?: number;
 }
 
 /** PILOT-2: AutoPilot configuration update response */
@@ -1939,6 +2349,10 @@ export interface AutoPilotDedupResult {
   namespaces_processed: number;
   memories_scanned: number;
   duplicates_removed: number;
+  /** Server v0.12.3+: duplicates found (in `report` mode none is removed). */
+  duplicates_found?: number;
+  /** Server v0.12.3+: the mode the pass ran in (`report` or `merge`). */
+  mode?: AutoPilotDedupMode | (string & {});
 }
 
 /** Consolidation result from a manual trigger */
@@ -2071,13 +2485,19 @@ export interface KeyInfo {
   inert_namespaces?: string[];
 }
 
-/** Request to create an API key (`POST /admin/keys`). */
+/**
+ * Request to create an API key (`POST /admin/keys`).
+ *
+ * The server refuses unknown fields with 422 (server v0.12.3+), and the
+ * SDK sends only these four. The former `permissions` and `expires_at` fields
+ * were never read by any server (a key created with `expires_at` never
+ * expired): use `scope` and `expires_in_days`. Passing them now throws a
+ * `ValidationError` before anything is sent.
+ */
 export interface CreateKeyRequest {
   name: string;
-  permissions?: string[];
-  expires_at?: string;
-  /** Scope of the new key (`read`, `write`, `admin`, `super_admin`). */
-  scope?: string;
+  /** Scope of the new key (`read`, `write`, `admin`, `super_admin`). Required by the server. */
+  scope: string;
   /**
    * Namespace grants (`null` = every namespace, `[]` = none). Server v0.12.2+
    * validates every entry (400 naming it) and accepts prefix patterns `p*`.
@@ -2223,6 +2643,11 @@ export interface BatchRecallResponse {
   filtered: number;
   /** True when the result set was capped by `limit` and more matching memories exist. */
   truncated: boolean;
+  /**
+   * Server v0.12.3+: request fields the server ignored (top level and
+   * `filter`). Absent when it ignored nothing.
+   */
+  warnings?: string[];
 }
 
 /** Request body for `DELETE /v1/memories/forget/batch`. */
@@ -2268,6 +2693,12 @@ export interface BatchStoreMemoryItem {
   id?: string;
   /** v0.12: `sha256:<hex>` attachment reference (see {@link StoreMemoryRequest.attachment_ref}). */
   attachment_ref?: string;
+  /**
+   * Server v0.12.3+: when this memory's event happened ({@link EventTime},
+   * see {@link StoreMemoryRequest.event_time}). Out of bounds: 400 naming
+   * `memories[i].event_time`. Not sent when undefined.
+   */
+  event_time?: EventTime;
 }
 
 /**
@@ -2309,6 +2740,17 @@ export interface BatchStoreMemoryResponse {
    * (the stores still succeeded). Omitted when none.
    */
   ended_sessions?: string[];
+  /**
+   * Server v0.12.3+ (Dakera-AI/dakera#933): the stored memories whose text is
+   * longer than the embedding model reads. Absent when there are none.
+   * (Not the `truncated: boolean` of {@link BatchRecallResponse}.)
+   */
+  truncated?: TruncatedMemory[];
+  /**
+   * Server v0.12.3+: request fields the server ignored (top level and each
+   * `memories[]` item). Absent when it ignored nothing.
+   */
+  warnings?: string[];
 }
 
 // ============================================================================
@@ -2716,7 +3158,21 @@ export interface AuditEvent {
   importance?: number;
   /** Unix milliseconds. */
   timestamp: number;
+  /**
+   * Server v0.12.3+: why the event happened, when the writer says
+   * (`deduplicated` → `"absorbed into <survivor>"`, `consolidated` →
+   * `"merged into <id>"`). Absent on older rows and servers.
+   */
+  reason?: string;
 }
+
+/**
+ * Audit `event_type` values a v0.12.3 server writes for deletions and
+ * restores (Dakera-AI/dakera#930); filter with `listAuditEvents({ eventType })`.
+ */
+export const AUDIT_EVENT_DEDUPLICATED = 'deduplicated';
+export const AUDIT_EVENT_CONSOLIDATED = 'consolidated';
+export const AUDIT_EVENT_RESTORED = 'restored';
 
 /** Response from GET /v1/audit (OBS-1). */
 export interface AuditListResponse {
@@ -2751,12 +3207,21 @@ export interface ExtractionResult {
 // SEC-3: AES-256-GCM Encryption Key Rotation
 // =============================================================================
 
-/** Request body for POST /v1/admin/encryption/rotate-key (SEC-3). */
+/**
+ * Request body for POST /v1/admin/encryption/rotate-key (SEC-3). The server
+ * refuses unknown fields with 422 (server v0.12.3+); the SDK sends only
+ * these, and only when defined.
+ */
 export interface RotateEncryptionKeyRequest {
-  /** New passphrase or 64-char hex key to rotate to. */
-  new_key: string;
-  /** If set, rotate only memories in this namespace. Omit to rotate all. */
+  /**
+   * New passphrase or 64-char hex key to derive the new data key from.
+   * Omitted: the server generates a random 256-bit key.
+   */
+  new_key?: string;
+  /** If set, rotate only this namespace. Omit to rotate the global key (every namespace). */
   namespace?: string;
+  /** Seconds to wait for the re-seal before answering (server default 10, max 300, 0 = answer at once). */
+  wait_secs?: number;
 }
 
 /** Response from POST /v1/admin/encryption/rotate-key (SEC-3). */
@@ -2764,6 +3229,24 @@ export interface RotateEncryptionKeyResponse {
   rotated: number;
   skipped: number;
   namespaces: string[];
+  /** v0.12: id of the new data key. */
+  key_id?: string;
+  /** v0.12: id of the key it replaced. */
+  previous_key_id?: string;
+  /** v0.12: `global` or `namespace`. */
+  scope?: string;
+  /** v0.12: the namespace rotated on its own, when `scope` is `namespace`. */
+  namespace?: string;
+  /** v0.12: state of the background re-seal. */
+  reseal?: string;
+  /** v0.12: BM25 indexes re-sealed. */
+  fulltext_indices_rotated?: number;
+  /** v0.12: namespaces whose re-seal failed (omitted when empty). */
+  failed_namespaces?: string[];
+  /** v0.12: what the operator must still do (e.g. set `DAKERA_ENCRYPTION_KEY`). */
+  action_required?: string;
+  /** v0.12: where to follow the re-seal (`GET /admin/encryption/status`). */
+  status_url?: string;
 }
 
 // =============================================================================
@@ -3239,13 +3722,29 @@ export interface QuotaCheckResult {
   exceeded_quota?: string;
 }
 
+/** Response from GET /admin/namespaces (server admin listing). */
+export interface AdminNamespaceList {
+  /** Every namespace with its stats (fields as the server sends them). */
+  namespaces: Array<Record<string, unknown>>;
+  /** Total namespace count. */
+  total: number;
+  /** Total vectors across all namespaces. */
+  total_vectors: number;
+  /** Fields of newer servers. */
+  [key: string]: unknown;
+}
+
 /** Response from GET /admin/backups. */
 export interface BackupListResponse {
   backups: BackupInfo[];
   total: number;
 }
 
-/** Request for POST /admin/backups. */
+/**
+ * Request for POST /admin/backups. The server refuses unknown fields with 422
+ * (server v0.12.3+; `encrypted` for `encrypt` used to write a plaintext
+ * backup in silence); the SDK sends only these, and only when defined.
+ */
 export interface CreateBackupRequest {
   name: string;
   backup_type?: BackupType;
@@ -3818,7 +4317,66 @@ export interface AdminConfig {
   session_idle_timeout_secs?: number;
   /** Live settings changed through `PUT /admin/config` (re-applied at startup). */
   runtime_overrides?: string[];
+  /**
+   * Server v0.12.3+: autopilot settings set through `PUT /admin/autopilot/config`
+   * (`autopilot_dedup_mode`, `autopilot_dedup_cross_session`,
+   * `autopilot_consolidate_cross_session`, `autopilot_trash_retention_hours`);
+   * absent until set there (the environment rules).
+   */
+  autopilot_dedup_mode?: AutoPilotDedupMode | (string & {});
+  autopilot_dedup_cross_session?: boolean;
+  autopilot_consolidate_cross_session?: boolean;
+  autopilot_trash_retention_hours?: number;
   [key: string]: unknown;
+}
+
+/**
+ * Answer of `PUT /admin/config` (`updateConfig()`): `{success, config,
+ * message, warnings?}`. Typed as an {@link AdminConfig} too for source
+ * compatibility with SDK releases that declared that return type; read the
+ * applied configuration from `config`.
+ */
+export interface AdminConfigUpdateResponse extends AdminConfig {
+  success?: boolean;
+  /** The configuration after the update. */
+  config?: AdminConfig;
+  message?: string;
+  /** Unknown or invalid keys the server did not apply. */
+  warnings?: string[];
+}
+
+// =============================================================================
+// Deduplicated memories (server v0.12.3+, Dakera-AI/dakera#930)
+// =============================================================================
+
+/** Which pass deleted a {@link DeduplicatedMemory}. */
+export type DeduplicatedKind = 'deduplication' | 'consolidation';
+
+/**
+ * A memory deduplication or consolidation deleted that can still be restored
+ * (`GET /v1/memory/deduplicated`).
+ */
+export interface DeduplicatedMemory {
+  /** The deleted memory's id (restore it under this id). */
+  id: MemoryId;
+  /** Which pass deleted it. */
+  kind: DeduplicatedKind | (string & {});
+  /** The memory it was folded (deduplication) or merged (consolidation) into. */
+  survivor_id: MemoryId;
+  /** Its session, if it had one. */
+  session_id?: string;
+  /** When it was deleted (Unix seconds). */
+  deleted_at: number;
+  /** Until when it can be restored (Unix seconds); purged after. */
+  restorable_until: number;
+}
+
+/** Answer of `GET /v1/memory/deduplicated?agent_id=`. */
+export interface DeduplicatedListResponse {
+  agent_id: string;
+  /** Restorable memories, newest first. */
+  memories: DeduplicatedMemory[];
+  count: number;
 }
 
 /** Derived data still owed (part of {@link DerivationStatus}). */
@@ -3933,4 +4491,324 @@ export interface DrainDerivationsResponse {
   graph_queued: number;
   /** The status after the drain. */
   status: DerivationStatus;
+}
+
+// =============================================================================
+// Document import (server v0.12.3+, Dakera-AI/dakera#923)
+// =============================================================================
+
+/** User-metadata key every document chunk memory carries ({@link DocumentChunkMeta}). */
+export const DOCUMENT_META_KEY = '_dakera_document';
+
+/** Prefix of the tag every chunk of a document carries: `document:<document_id>`. */
+export const DOCUMENT_TAG_PREFIX = 'document:';
+
+/** Media types `POST /v1/memory/documents` accepts as text (`text/plain` is the default). */
+export type DocumentTextMediaType = 'text/plain' | 'text/markdown' | 'text/html';
+
+/** Every {@link DocumentTextMediaType}. */
+export const DOCUMENT_TEXT_MEDIA_TYPES: readonly DocumentTextMediaType[] = [
+  'text/plain',
+  'text/markdown',
+  'text/html',
+];
+
+/**
+ * How the extracted text is split: `structure` (default: sections at
+ * headings, then paragraphs, sentences, words) or `fixed` (plain token
+ * windows with overlap; headings are text).
+ */
+export type ChunkStrategy = 'structure' | 'fixed';
+
+/**
+ * The `chunking` field of an import request. The server refuses any other
+ * field with 422 (`deny_unknown_fields`); the SDK refuses it before sending.
+ */
+export interface ChunkingOptions {
+  /**
+   * Token budget of one chunk's text (default `DAKERA_DOCUMENT_CHUNK_TOKENS`,
+   * 400), clamped to the embedding model's token cap.
+   */
+  max_tokens?: number;
+  /**
+   * Tokens repeated from the end of the previous chunk (default
+   * `DAKERA_DOCUMENT_CHUNK_OVERLAP_TOKENS`, 50; at most a quarter of the budget).
+   */
+  overlap_tokens?: number;
+  /** `structure` (default) or `fixed`. */
+  strategy?: ChunkStrategy;
+}
+
+/**
+ * Fields both import requests share: what every chunk memory carries (as on
+ * `POST /v1/memory/store`), the chunking options and `decompose`. Undefined
+ * fields are not sent (the server defaults apply).
+ */
+export interface DocumentImportCommon {
+  /** Memory type of every chunk (server default `episodic`). */
+  memory_type?: MemoryType;
+  /** Session every chunk belongs to. */
+  session_id?: string;
+  /** Importance of every chunk, 0–1 (server default 0.5). */
+  importance?: number;
+  /** Tags of every chunk; the server adds `document:<document_id>`. */
+  tags?: string[];
+  /** User metadata of every chunk; the server adds `_dakera_document`. */
+  metadata?: Record<string, unknown>;
+  /** Time to live of every chunk, in seconds. */
+  ttl_seconds?: number;
+  /** Expiry of every chunk (unix seconds). */
+  expires_at?: number;
+  /** Language of the document for the write-time derivations. */
+  lang?: string;
+  /** Chunking options ({@link ChunkingOptions}). */
+  chunking?: ChunkingOptions;
+  /**
+   * Derive CE-31 sentence sub-memories from every chunk (default `false`: a
+   * chunk is already a retrieval unit, and up to 16 sentences per chunk would
+   * multiply the index up to 17-fold).
+   */
+  decompose?: boolean;
+}
+
+/**
+ * Body of `POST /v1/memory/documents` (without `agent_id`, which is the
+ * method's first argument): a document given as text.
+ */
+export interface ImportDocumentRequest extends DocumentImportCommon {
+  /** The document itself (at most `DAKERA_DOCUMENT_MAX_BYTES` bytes, default 25 MiB). */
+  content: string;
+  /** `text/plain` (default), `text/markdown` or `text/html`. */
+  media_type?: DocumentTextMediaType;
+  /**
+   * Title (else taken from the document: Markdown front matter or first `#`
+   * heading, HTML `<title>`). The root of every chunk's breadcrumb.
+   */
+  title?: string;
+  /**
+   * Document id. Default: derived from the agent and the content's SHA-256,
+   * so importing the same bytes again replaces the document with itself.
+   */
+  document_id?: string;
+}
+
+/**
+ * Body of `POST /v1/namespaces/{ns}/attachments/{ref}/document` (without
+ * `agent_id`). The format comes from the attachment's stored media type: PDF,
+ * DOCX, HTML, Markdown or text.
+ */
+export interface ImportAttachmentDocumentRequest extends DocumentImportCommon {
+  /** Title (else taken from the document: PDF `Title`, DOCX `dc:title`, ...). */
+  title?: string;
+  /** Document id. Default: derived from the agent and the attachment's content hash. */
+  document_id?: string;
+}
+
+/** `202` answer of both import routes. */
+export interface ImportDocumentAccepted {
+  job_id: string;
+  document_id: string;
+  agent_id: string;
+  /** Route to poll for the job (`GET`, a key that may read the agent). */
+  status_url: string;
+}
+
+/** State of a document import job. */
+export type DocumentJobStatus = 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
+
+/**
+ * A document import job (`GET /v1/memory/documents/jobs/{job_id}`), the
+ * server's job record.
+ */
+export interface DocumentImportJob {
+  id: string;
+  /** `document_import`. */
+  job_type: string;
+  status: DocumentJobStatus;
+  /** Unix seconds. */
+  created_at: number;
+  started_at?: number | null;
+  completed_at?: number | null;
+  /** 0–100. */
+  progress: number;
+  /**
+   * Progress (`chunks_stored n/total`) or, when completed, what the import did
+   * (`document imported: N chunks (W written, U unchanged, S stale removed)`).
+   */
+  message?: string | null;
+  /**
+   * `namespace`, `agent_id`, `document_id`, and for an attachment import
+   * `source_namespace` and `attachment_ref`.
+   */
+  metadata: Record<string, string>;
+  /**
+   * Why a `Failed` job failed: the HTTP status and error code the request
+   * would have answered (413 too big / too many chunks, 422
+   * `UNPROCESSABLE_CONTENT`, 504 `EXTRACTION_TIMEOUT`, ...).
+   */
+  error?: { status: number; code: string };
+}
+
+/**
+ * What `_dakera_document` holds on every chunk memory. The document-level
+ * fields are repeated on every chunk, so one chunk describes its document.
+ */
+export interface DocumentChunkMeta {
+  /** The document id. */
+  id: string;
+  title?: string;
+  media_type: string;
+  /** Position of this chunk, from 0. */
+  chunk_index: number;
+  /** Chunks of the document. */
+  chunk_count: number;
+  /** First page the chunk's text comes from (PDF; form-feed pages of plain text). */
+  page_start?: number;
+  /** Last page the chunk's text comes from. */
+  page_end?: number;
+  /** Headings above the chunk, outermost first (the title included). */
+  heading_path: string[];
+  /** Character range of the chunk's text in the extracted text. */
+  char_start: number;
+  char_end: number;
+  /** SHA-256 (hex) of the source document's bytes. */
+  sha256: string;
+  /** Bytes of the source document. */
+  bytes: number;
+  /** Pages of the source document, when it has pages. */
+  pages?: number;
+  /** When the document was first imported (unix seconds). */
+  created_at: number;
+  /** When the document was last imported (unix seconds). */
+  updated_at: number;
+  /** Whether CE-31 sentence sub-memories are derived from this chunk (absent = false). */
+  decompose?: boolean;
+  /** Hash of everything the chunk memory was written from. */
+  fingerprint?: string;
+}
+
+/** One document of `GET /v1/memory/documents`. */
+export interface DocumentSummary {
+  document_id: string;
+  title?: string;
+  media_type: string;
+  chunk_count: number;
+  bytes: number;
+  pages?: number;
+  /** Unix seconds. */
+  created_at: number;
+  /** Unix seconds. */
+  updated_at: number;
+  sha256: string;
+  /** The attachment the document was imported from. */
+  attachment_ref?: string;
+}
+
+/** `GET /v1/memory/documents` answer. */
+export interface DocumentListResponse {
+  /** Sorted by document id. */
+  documents: DocumentSummary[];
+  /** Pass as `cursor` for the next page; absent on the last one. */
+  next_cursor?: string;
+}
+
+/** Options of {@link DakeraClient.listDocuments}. */
+export interface ListDocumentsOptions {
+  /** The `next_cursor` of the previous page. */
+  cursor?: string;
+  /** Page size, 1–500 (server default 50). */
+  limit?: number;
+}
+
+/** One chunk of `GET /v1/memory/documents/{id}`. */
+export interface DocumentChunkInfo {
+  /** The chunk's memory id (`doc_<hash>`). */
+  id: string;
+  chunk_index: number;
+  page_start?: number;
+  page_end?: number;
+  heading_path: string[];
+  char_start: number;
+  char_end: number;
+}
+
+/** `GET /v1/memory/documents/{id}` answer: one document and its chunks. */
+export interface DocumentDetail {
+  document: DocumentSummary;
+  chunks: DocumentChunkInfo[];
+}
+
+/** `DELETE /v1/memory/documents/{id}` answer. */
+export interface DeleteDocumentResponse {
+  document_id: string;
+  /** Chunk memories removed. */
+  deleted_chunks: number;
+}
+
+/** Options of {@link DakeraClient.waitForDocumentJob}. */
+export interface WaitForDocumentJobOptions {
+  /** Poll interval in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms with a `TimeoutError` (default 600000). */
+  timeoutMs?: number;
+  /** Stop waiting (and abort the poll in flight) when this signal aborts. */
+  signal?: AbortSignal;
+}
+
+/**
+ * The `_dakera_document` metadata of a memory (a recall or search result, a
+ * listed or fetched memory) when it is a document chunk; `undefined`
+ * otherwise, or when the value does not have the chunk shape. Only own
+ * properties are read.
+ *
+ * @example
+ * ```ts
+ * for (const m of (await client.recall('docs-bot', 'install on linux')).memories) {
+ *   const doc = documentChunkMeta(m);
+ *   if (doc) console.log(`${doc.title} p.${doc.page_start ?? '-'} › ${doc.heading_path.join(' › ')}`);
+ * }
+ * ```
+ */
+export function documentChunkMeta(
+  memory: { metadata?: Record<string, unknown> | null } | null | undefined,
+): DocumentChunkMeta | undefined {
+  const metadata = memory?.metadata;
+  if (metadata === null || typeof metadata !== 'object') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(metadata, DOCUMENT_META_KEY)) return undefined;
+  const raw = (metadata as Record<string, unknown>)[DOCUMENT_META_KEY];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const m = raw as Record<string, unknown>;
+  const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  if (
+    typeof m.id !== 'string' ||
+    typeof m.media_type !== 'string' ||
+    !isNum(m.chunk_index) ||
+    !isNum(m.chunk_count) ||
+    !isNum(m.char_start) ||
+    !isNum(m.char_end)
+  ) {
+    return undefined;
+  }
+  const meta: DocumentChunkMeta = {
+    id: m.id,
+    media_type: m.media_type,
+    chunk_index: m.chunk_index,
+    chunk_count: m.chunk_count,
+    heading_path: Array.isArray(m.heading_path)
+      ? m.heading_path.filter((h): h is string => typeof h === 'string')
+      : [],
+    char_start: m.char_start,
+    char_end: m.char_end,
+    sha256: typeof m.sha256 === 'string' ? m.sha256 : '',
+    bytes: isNum(m.bytes) ? m.bytes : 0,
+    created_at: isNum(m.created_at) ? m.created_at : 0,
+    updated_at: isNum(m.updated_at) ? m.updated_at : 0,
+  };
+  if (typeof m.title === 'string') meta.title = m.title;
+  if (isNum(m.page_start)) meta.page_start = m.page_start;
+  if (isNum(m.page_end)) meta.page_end = m.page_end;
+  if (isNum(m.pages)) meta.pages = m.pages;
+  if (typeof m.decompose === 'boolean') meta.decompose = m.decompose;
+  if (typeof m.fingerprint === 'string') meta.fingerprint = m.fingerprint;
+  return meta;
 }

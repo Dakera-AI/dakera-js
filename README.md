@@ -116,12 +116,120 @@ for (const r of results) {
 ### SSE Streaming
 
 ```typescript
-// Subscribe to real-time memory events
-const stream = client.subscribeMemoryEvents('my-agent');
+// Subscribe to real-time memory events of one agent
+const stream = client.subscribeAgentMemories('my-agent');
 for await (const event of stream) {
-  console.log(event.type, event.memory_id);
+  console.log(event.event_type, event.memory_id);
 }
 ```
+
+The streams send the key in the `Authorization` header (never in the URL) and close the connection when
+you `break` out of the loop.
+
+---
+
+## What's new for Dakera server v0.12.3
+
+This SDK release (0.12.3) targets Dakera server **v0.12.3** and stays **compatible with v0.12.0–v0.12.2 servers**:
+the new request fields are left out when unset (older servers ignore them) and the new response fields are
+optional. The features below need a **v0.12.3+** server.
+
+- **`neighborhood_mode`** on `recall()` — `'inline' | 'separate' | 'off'` (omit = server default
+  `DAKERA_NEIGHBORHOOD_MODE`, default `inline`; `neighborhood: false` still means off and wins).
+  Under `inline`, neighbourhood context is appended to `memories` **after** the `top_k` ranked results, each
+  marked `retrieval: "neighborhood"` (its `score` is a raw similarity, not comparable). Use `separate` when
+  `top_k` must be the maximum: `memories.length <= top_k` and the context comes in `context_memories`, each
+  entry with `context_of` (the ranked memory it belongs to). `ChatMemorySession.recall()` asks for `separate`.
+- **`include_summaries`** on `recall()` — keep session summaries out of (or in) turn-level recall; omit for
+  the server default.
+- Results (`recall()` and `searchMemories()`) may carry **`matched_text`** / **`matched_ids`** when the
+  server collapses derived sentence sub-memories into their source (`DAKERA_RECALL_COLLAPSE_DERIVED`).
+- `RecallResponse` now also returns the server's `query_embedding_time_ms`, `search_time_ms`,
+  `rerank_report` and `late_interaction_first_stage`; `fusion` defaults to `minmax`, and the `rerank`
+  pool is 10x the ranking depth `max(top_k, 10)` on hybrid routing.
+- **`rank_score`** on recall results — the server's ranking field, non-increasing over `memories` in response
+  order: sort or threshold on it. `RecalledMemory.score` is `rank_score` when the server sends it.
+- **`event_time`** on `storeMemory()` and on each `storeMemoriesBatch()` item — when the memory's event
+  happened, as Unix seconds, an RFC 3339 string or a `Date` (sent as its ISO string). The server records it as
+  metadata `_dakera_event_time`; recency, `since` / `until` and the temporal graph edges read it instead of the
+  ingest time (`created_at` stays the ingest time). Bounds are checked by the server (400 naming the field).
+- **Truncation report** — when a text is longer than the embedding model reads, `storeMemory()` and
+  `updateMemory()` answer `truncated: true` with `content_tokens`, `embedded_tokens`, `max_tokens`, `windows`
+  (and `tokens_estimated`); `storeMemoriesBatch()` lists such memories in `truncated: [{ id, ... }]`.
+- **`warnings`** on store, batch store, recall and batch recall responses: request fields the server ignored.
+  The SDK sends only fields the server knows (the deprecated `valid_from` now goes to `metadata.valid_from`,
+  where the server reads it; the deprecated `embedding`, which no server reads, is no longer sent).
+- **Deduplicated memories** — `listDeduplicated(agentId)` lists memories deduplication or consolidation
+  deleted that can still be restored (`kind`, `survivor_id`, `restorable_until`); `restoreDeduplicated(agentId,
+  memoryId)` puts one back (`NotFoundError` without a restorable copy, `ConflictError` when the agent holds the id
+  again). Audit events (`listAuditEvents()`) and memory events carry `reason`; the new audit event types are
+  `deduplicated`, `consolidated` and `restored`.
+- **Autopilot** — status and `autopilotUpdateConfig()` gain `dedup_mode` (`off` | `report` | `merge`; the server
+  default is now `off`), `dedup_cross_session`, `consolidate_cross_session` and `trash_retention_hours`; the
+  trigger's `dedup` result gains `duplicates_found` and `mode`; `getConfig()` shows the `autopilot_*`
+  overrides once set. `updateConfig()` is typed as the server's `{ success, config, message, warnings }`.
+- **`getMemory(memoryId)`** without an agent id: the server looks in every agent the key may read (several
+  holders → `ValidationError` asking for the agent). `getMemory(agentId, memoryId)` is unchanged.
+- **Behaviour change:** `recall()`, `searchMemories()` and `batchRecall()` for an agent that has stored nothing
+  answer with no memories (an older server answered 404 `NAMESPACE_NOT_FOUND`). Session ids may contain `:`
+  (`capabilities().naming.session_id_pattern`). New error codes `HOST_NOT_ALLOWED` (421, a `Host` the server
+  does not answer for while authentication is off), `UNPROCESSABLE_CONTENT` (422) and `EXTRACTION_TIMEOUT`
+  (504); a 401 or 429 error keeps the server's own message.
+- **Strict admin bodies** — `POST /admin/keys`, `POST /v1/namespaces/{ns}/keys`, `POST /admin/backups` and
+  `POST /admin/encryption/rotate-key` answer **422** to an unknown field. `createKey()`,
+  `createNamespaceKey()`, `adminCreateBackup()` and `rotateEncryptionKey()` send only the fields the server
+  knows, never `undefined` ones, and throw a `ValidationError` for any other field before sending.
+- **`opsShutdown()`** needs a global **super_admin** key on a v0.12.3 server (`admin` → 403).
+- **ODE sidecar** — requests to `odeUrl` currently carry the Dakera API key; tracked in
+  [Dakera-AI/dakera#924](https://github.com/Dakera-AI/dakera/issues/924).
+
+```typescript
+const res = await client.recall('my-agent', 'deploy port', { top_k: 5, neighborhood_mode: 'separate' });
+for (const m of res.memories) console.log(m.id, m.matched_text ?? m.content);
+for (const c of res.context_memories ?? []) console.log(`  context of ${c.context_of}:`, c.content);
+```
+
+### Document import (server v0.12.3+)
+
+A document (text, Markdown, HTML, or an uploaded PDF / DOCX / HTML / Markdown / text attachment) becomes a
+set of **chunk memories** of the agent, each with `_dakera_document` metadata (document, page range, heading
+path). Imports run as jobs. `capabilities().documents?.enabled` says whether the server has the routes; a
+server older than v0.12.3 answers them 404, which the SDK reports as "needs Dakera server v0.12.3+".
+
+```typescript
+import { documentChunkMeta } from '@dakera-ai/dakera';
+
+// Text / Markdown / HTML
+const accepted = await client.importDocument('docs-bot', {
+  content: markdown,
+  media_type: 'text/markdown',
+  tags: ['manual'],
+  chunking: { max_tokens: 300, strategy: 'structure' }, // optional
+});
+// Bounded wait; pass an AbortSignal to stop it early
+const job = await client.waitForDocumentJob(accepted, { timeoutMs: 120_000, signal });
+
+// PDF / DOCX: upload, then import
+const { attachment_ref } = await client.uploadAttachment('library', pdfBytes, 'application/pdf');
+await client.importAttachmentDocument('library', attachment_ref, 'docs-bot', { document_id: 'manual-v3' });
+
+// Cite the source of a recalled chunk
+for (const m of (await client.recall('docs-bot', 'install on linux')).memories) {
+  const doc = documentChunkMeta(m);
+  if (doc) console.log(doc.title, doc.page_start, doc.heading_path.join(' › '));
+}
+
+// Manage documents
+const page = await client.listDocuments('docs-bot', { limit: 50 }); // page.next_cursor → cursor
+const detail = await client.getDocument('docs-bot', 'manual-v3');  // the document and its chunks
+await client.deleteDocument('docs-bot', 'manual-v3');               // every chunk
+```
+
+Request objects are strict: only the server's fields are sent (`content`, `media_type`, `title`,
+`document_id`, the memory fields `memory_type`, `session_id`, `importance`, `tags`, `metadata`, `ttl_seconds`,
+`expires_at`, `lang`, plus `chunking: {max_tokens, overlap_tokens, strategy}` and `decompose`), and any other
+field throws a `ValidationError` before sending. A failed job throws a `DakeraError` with the job's status and
+code (413 too big / too many chunks, 422 `UNPROCESSABLE_CONTENT`, 504 `EXTRACTION_TIMEOUT`).
 
 ---
 
@@ -256,13 +364,28 @@ const client = new DakeraClient({
   apiKey: 'your-key',
 });
 
-// With custom retry config
+// With custom retry config and timeout
 const client = new DakeraClient({
   baseUrl: 'http://localhost:3000',
   apiKey: 'your-key',
-  retryBackoff: { maxRetries: 5, baseDelayMs: 200, maxDelayMs: 10000 },
+  timeout: 10_000, // ms per attempt, response body included (default 30 000)
+  retryBackoff: { maxRetries: 5, baseDelay: 200, maxDelay: 10000 },
 });
 ```
+
+**Timeouts and retries.** Every attempt runs under an `AbortController` deadline (`timeout`, default 30 s)
+that covers the response body too, and ends in a `TimeoutError`. Only safe retries are made: `429` and `503`
+for every request (the server did not process it), honouring `Retry-After` (seconds or HTTP-date, capped at
+60 s); other `5xx`, timeouts and network errors only for idempotent requests (GET, HEAD, PUT, DELETE and
+read-only POSTs such as recall, search and query). A write such as `storeMemory()` that times out is not sent
+twice. Other `4xx` and `501` are never retried.
+
+**Keep API keys out of browsers.** A key in browser code is readable by anyone who can open the page. Call
+Dakera from your backend, or put a proxy in front of it that adds the key server-side (as the Dakera
+dashboard does) and construct the browser client without `apiKey`. The SDK sends the key only in the
+`Authorization` header; it is kept in a private field, so it is not in `JSON.stringify(client)`,
+`console.log(client)` or any error the SDK throws. `sseUrl()` (key in a `?api_key=` URL, for
+`EventSource`) is deprecated: URLs end up in logs and history.
 
 ---
 

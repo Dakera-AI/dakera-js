@@ -41,7 +41,12 @@ export interface StoreOptions {
 }
 
 export interface RecallOptions {
-  /** Maximum number of memories to return (default: 5). */
+  /**
+   * Maximum number of memories to return (default: 5). Honoured by asking the
+   * server for `neighborhood_mode: "separate"`, so neighbourhood context is
+   * not appended after the `topK` results (servers older than v0.12.3 ignore
+   * the field and may still append it).
+   */
   topK?: number;
 }
 
@@ -143,6 +148,7 @@ export class ChatMemorySession {
   ): Promise<RecalledMemory[]> {
     const response = await this._client.recall(this._agentId, query, {
       top_k: options.topK ?? 5,
+      neighborhood_mode: 'separate',
     });
     return response.memories;
   }

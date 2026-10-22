@@ -226,8 +226,25 @@ const V0122_ROUTES = [
   'POST /v1/sessions/{id}/touch',
 ];
 
+/**
+ * Routes server v0.12.3 adds: document import (Dakera-AI/dakera#923; the SDK
+ * methods calling them answer 404 `ROUTE_NOT_FOUND` on an older server, which
+ * they report as "needs Dakera server v0.12.3+") and the deduplicated-memory
+ * routes (Dakera-AI/dakera#930).
+ */
+const V0123_ROUTES = [
+  'POST /v1/memory/documents',
+  'GET /v1/memory/documents',
+  'GET /v1/memory/documents/jobs/{job_id}',
+  'GET /v1/memory/documents/{document_id}',
+  'DELETE /v1/memory/documents/{document_id}',
+  'POST /v1/namespaces/{namespace}/attachments/{reference}/document',
+  'GET /v1/memory/deduplicated',
+  'POST /v1/memory/deduplicated/{id}/restore',
+];
+
 const known = new Set(
-  [...V012_ROUTES, ...V0122_ROUTES].map((r) => {
+  [...V012_ROUTES, ...V0122_ROUTES, ...V0123_ROUTES].map((r) => {
     const [method, path] = r.split(' ');
     return `${method} ${path.replace(/\{[^}]*\}/g, '{}')}`;
   })
@@ -256,7 +273,7 @@ function sdkCalls(): Array<{ method: string; path: string }> {
   return out;
 }
 
-describe('SDK endpoints exist in the v0.12.0 / v0.12.2 router', () => {
+describe('SDK endpoints exist in the v0.12.0 / v0.12.2 / v0.12.3 router', () => {
   const calls = sdkCalls();
 
   it('finds the SDK request calls', () => {

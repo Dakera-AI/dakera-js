@@ -961,8 +961,8 @@ describe('DakeraClient', () => {
       expect(body.expires_at).toBeUndefined();
     });
 
-    // bi-temporal valid_from — server v0.11.98+ (DAK-7424)
-    it('includes valid_from in request body when set', async () => {
+    // bi-temporal valid_from: the server reads it from the metadata
+    it('sends valid_from as metadata.valid_from when set', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -975,7 +975,8 @@ describe('DakeraClient', () => {
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/memory/store');
       const body = JSON.parse(init?.body as string);
-      expect(body.valid_from).toBe(1700000000);
+      expect(body.valid_from).toBeUndefined();
+      expect(body.metadata).toEqual({ valid_from: 1700000000 });
       expect(body.agent_id).toBe('agent-1');
     });
 

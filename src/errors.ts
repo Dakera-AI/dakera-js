@@ -28,6 +28,12 @@ export enum ErrorCode {
   FEATURE_DISABLED = 'FEATURE_DISABLED',
   // 403 (v0.12)
   CROSS_ORIGIN_REQUEST_REFUSED = 'CROSS_ORIGIN_REQUEST_REFUSED',
+  /**
+   * 421 (server v0.12.3+): authentication is off and the request's `Host` is
+   * not one the server answers for (DNS-rebinding protection; the server's
+   * `DAKERA_ALLOWED_HOSTS` lists extra names).
+   */
+  HOST_NOT_ALLOWED = 'HOST_NOT_ALLOWED',
   // 429
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
   // 504
@@ -40,6 +46,11 @@ export enum ErrorCode {
   // 404 (v0.12)
   API_KEY_NOT_FOUND = 'API_KEY_NOT_FOUND',
   JOB_NOT_FOUND = 'JOB_NOT_FOUND',
+  // Document import job failures (server v0.12.3+)
+  /** 422: the content cannot be processed (malformed PDF / DOCX, no text, ...). */
+  UNPROCESSABLE_CONTENT = 'UNPROCESSABLE_CONTENT',
+  /** 504: a document extraction ran past its time limit. */
+  EXTRACTION_TIMEOUT = 'EXTRACTION_TIMEOUT',
   // 401
   AUTHENTICATION_REQUIRED = 'AUTHENTICATION_REQUIRED',
   INVALID_API_KEY = 'INVALID_API_KEY',

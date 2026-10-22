@@ -96,6 +96,32 @@ export interface VisionCapabilities {
   raw: Record<string, unknown>;
 }
 
+/**
+ * Document import (`capabilities.documents`, server v0.12.3+): whether the
+ * `/v1/memory/documents` routes answer and what they accept.
+ */
+export interface DocumentCapabilities {
+  /** Whether the document routes answer (`DAKERA_DOCUMENTS`, default on). */
+  enabled: boolean;
+  /** Media types `POST /v1/memory/documents` takes as text. */
+  text_media_types: string[];
+  /** Media types an attachment may have to be imported as a document. */
+  media_types: string[];
+  /** Bytes one document may have (`DAKERA_DOCUMENT_MAX_BYTES`). */
+  max_bytes: number;
+  /** Bytes of text one extraction may produce (`DAKERA_DOCUMENT_MAX_TEXT_BYTES`). */
+  max_text_bytes: number;
+  /** Chunks one document may become (`DAKERA_DOCUMENT_MAX_CHUNKS`). */
+  max_chunks: number;
+  /** Default token budget of a chunk's text, before the model cap. */
+  default_chunk_tokens: number;
+  /** Default overlap between chunks, in tokens. */
+  default_overlap_tokens: number;
+  /** `chunking.strategy` values (`structure`, `fixed`). */
+  strategies: string[];
+  raw: Record<string, unknown>;
+}
+
 /** Key and grant surface (`capabilities.auth`, server v0.12.2+). */
 export interface AuthCapabilities {
   /** Key grants accept prefix patterns `p*`. */
@@ -117,6 +143,13 @@ export interface AuthCapabilities {
 export interface NamingCapabilities {
   agent_id_pattern: string;
   agent_id_max_bytes: number;
+  /**
+   * Server v0.12.3+: pattern a session id must match (the memory-id alphabet:
+   * `:` is allowed, e.g. `user:42`). Undefined on older servers.
+   */
+  session_id_pattern?: string;
+  /** Server v0.12.3+: longest session id, in bytes. Undefined on older servers. */
+  session_id_max_bytes?: number;
   agent_namespace_prefix: string;
   agent_namespace_max_bytes: number;
   namespace_pattern: string;
@@ -175,6 +208,11 @@ export interface ServerCapabilities {
   naming?: NamingCapabilities;
   /** v0.12.2 (`capabilities_version` 2): session idle timeout and touch. Undefined on older servers. */
   sessions?: SessionCapabilities;
+  /**
+   * v0.12.3: document import. Undefined on older servers, whose document
+   * routes answer 404: check `documents?.enabled` before importing.
+   */
+  documents?: DocumentCapabilities;
   /** The verbatim document. */
   raw: Record<string, unknown>;
 }
@@ -327,6 +365,11 @@ function parseNaming(raw: unknown): NamingCapabilities | undefined {
   return {
     agent_id_pattern: text(raw.agent_id_pattern),
     agent_id_max_bytes: integer(raw.agent_id_max_bytes),
+    ...optional('session_id_pattern', typeof raw.session_id_pattern === 'string' ? raw.session_id_pattern : undefined),
+    ...optional(
+      'session_id_max_bytes',
+      typeof raw.session_id_max_bytes === 'number' ? integer(raw.session_id_max_bytes) : undefined,
+    ),
     agent_namespace_prefix: text(raw.agent_namespace_prefix, '_dakera_agent_'),
     agent_namespace_max_bytes: integer(raw.agent_namespace_max_bytes),
     namespace_pattern: text(raw.namespace_pattern),
@@ -345,6 +388,22 @@ function parseSessions(raw: unknown): SessionCapabilities | undefined {
     max_idle_timeout_secs: integer(raw.max_idle_timeout_secs),
     touch: raw.touch === true,
     ended_reason: raw.ended_reason === true,
+    raw,
+  };
+}
+
+function parseDocuments(raw: unknown): DocumentCapabilities | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    enabled: raw.enabled === true,
+    text_media_types: stringList(raw.text_media_types),
+    media_types: stringList(raw.media_types),
+    max_bytes: integer(raw.max_bytes),
+    max_text_bytes: integer(raw.max_text_bytes),
+    max_chunks: integer(raw.max_chunks),
+    default_chunk_tokens: integer(raw.default_chunk_tokens),
+    default_overlap_tokens: integer(raw.default_overlap_tokens),
+    strategies: stringList(raw.strategies),
     raw,
   };
 }
@@ -379,6 +438,7 @@ export function parseCapabilities(raw: unknown): ServerCapabilities {
     ...optional('auth', parseAuth(doc.auth)),
     ...optional('naming', parseNaming(doc.naming)),
     ...optional('sessions', parseSessions(doc.sessions)),
+    ...optional('documents', parseDocuments(doc.documents)),
     raw: doc,
   };
 }
