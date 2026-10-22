@@ -158,7 +158,7 @@ optional. The features below need a **v0.12.3+** server.
   (and `tokens_estimated`); `storeMemoriesBatch()` lists such memories in `truncated: [{ id, ... }]`.
 - **`warnings`** on store, batch store, recall and batch recall responses: request fields the server ignored.
   The SDK sends only fields the server knows (the deprecated `valid_from` now goes to `metadata.valid_from`,
-  where the server reads it; the deprecated `embedding` is not a server field and is reported there).
+  where the server reads it; the deprecated `embedding`, which no server reads, is no longer sent).
 - **Deduplicated memories** — `listDeduplicated(agentId)` lists memories deduplication or consolidation
   deleted that can still be restored (`kind`, `survivor_id`, `restorable_until`); `restoreDeduplicated(agentId,
   memoryId)` puts one back (`NotFoundError` without a restorable copy, `ConflictError` when the agent holds the id

@@ -150,6 +150,12 @@ describe('server v0.12.3 additions', () => {
       expect(lastCall().body).toEqual({ content: 'x', id: 'turn-17', agent_id: 'planner' });
     });
 
+    it('never sends the deprecated embedding, which no server reads', async () => {
+      mockFetch.mockResolvedValue(json(200, { memory: MEMORY, embedding_time_ms: 3 }));
+      await client.storeMemory('planner', { content: 'x', embedding: [0.1, 0.2] });
+      expect(lastCall().body).toEqual({ content: 'x', agent_id: 'planner' });
+    });
+
     it('sends the deprecated valid_from as metadata.valid_from, where the server reads it', async () => {
       mockFetch.mockResolvedValue(json(200, { memory: MEMORY, embedding_time_ms: 3 }));
       await client.storeMemory('planner', { content: 'x', valid_from: 1700000000, metadata: { k: 1 } });

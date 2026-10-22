@@ -788,8 +788,7 @@ export interface StoreMemoryRequest {
   event_time?: EventTime;
   /**
    * @deprecated No server reads a pre-computed embedding on a memory store
-   * (the server embeds `content` itself). Still sent when set, so a v0.12.3+
-   * server lists it in the response's `warnings`.
+   * (the server embeds `content` itself), so the SDK does not send it.
    */
   embedding?: number[];
   /**

@@ -119,7 +119,7 @@ new response fields are optional; the new features need a v0.12.3+ server.
   returns.
 - The deprecated `StoreMemoryRequest.valid_from` is sent as `metadata.valid_from`, where the server reads
   it (an explicit `metadata.valid_from` wins); at the top level no server ever read it. The deprecated
-  `embedding` is not a server field (a v0.12.3 server lists it in `warnings`).
+  `embedding` is not a server field and is no longer sent.
 - `updateConfig()` returns `AdminConfigUpdateResponse`: the server's `{ success, config, message,
   warnings }` (it was typed as the configuration itself).
 - A 401 or 429 error keeps the server's message (a v0.12.3 overload 429 names the full queue) instead of a

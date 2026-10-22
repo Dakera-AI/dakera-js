@@ -97,10 +97,13 @@ function eventTimeWire(value: EventTime, field: string): number | string {
  * `metadata.valid_from` wins). Undefined fields stay out.
  */
 function memoryWriteBody(item: object, field: string): Record<string, unknown> {
-  const { event_time, valid_from, ...rest } = item as { event_time?: EventTime; valid_from?: number } & Record<
-    string,
-    unknown
-  >;
+  // `embedding` (deprecated) is not a field of any memory write: the server
+  // embeds `content` itself, so it is never sent.
+  const { event_time, valid_from, embedding: _embedding, ...rest } = item as {
+    event_time?: EventTime;
+    valid_from?: number;
+    embedding?: unknown;
+  } & Record<string, unknown>;
   const body: Record<string, unknown> = { ...rest };
   if (event_time !== undefined && event_time !== null) body.event_time = eventTimeWire(event_time, field);
   if (valid_from !== undefined && valid_from !== null) {
