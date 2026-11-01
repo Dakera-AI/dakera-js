@@ -2650,9 +2650,29 @@ export class DakeraClient {
     return result;
   }
 
-  /** Consolidate memories for an agent */
+  /**
+   * Merge memories of an agent into one (`POST /v1/memory/consolidate`).
+   *
+   * The merged memory is stored and the **source memories are deleted**. The
+   * server has no dry run for this route: `dry_run: true` throws a
+   * {@link ValidationError} instead of sending the request (earlier SDKs sent
+   * it and the server merged anyway). Only `memory_ids`, `threshold` and
+   * `target_type` are sent.
+   */
   async consolidate(agentId: string, request?: ConsolidateRequest): Promise<ConsolidateResponse> {
-    return this.request<ConsolidateResponse>('POST', '/v1/memory/consolidate', { ...(request ?? {}), agent_id: agentId });
+    if (request?.dry_run) {
+      throw new ValidationError(
+        'consolidate({ dry_run: true }): the server has no dry run for /v1/memory/consolidate and would merge the memories',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST
+      );
+    }
+    const body: Record<string, unknown> = { agent_id: agentId };
+    if (request?.memory_ids !== undefined) body['memory_ids'] = request.memory_ids;
+    if (request?.threshold !== undefined) body['threshold'] = request.threshold;
+    if (request?.target_type !== undefined) body['target_type'] = request.target_type;
+    return this.request<ConsolidateResponse>('POST', '/v1/memory/consolidate', body);
   }
 
   /** Consolidate memories directly for an agent (DBSCAN clustering). */
@@ -2677,9 +2697,19 @@ export class DakeraClient {
     );
   }
 
-  /** Submit feedback on a memory recall */
+  /**
+   * Submit a feedback signal on a memory (`POST /v1/memory/feedback`).
+   *
+   * Same effect as {@link DakeraClient.feedbackMemory}: `upvote`/`positive`
+   * boosts importance ×1.15, `downvote`/`negative` lowers it ×0.85, `flag`
+   * makes the memory decay faster.
+   */
   async memoryFeedback(agentId: string, request: MemoryFeedbackRequest): Promise<MemoryFeedbackResponse> {
-    return this.request<MemoryFeedbackResponse>('POST', '/v1/memory/feedback', { ...request, agent_id: agentId });
+    return this.request<MemoryFeedbackResponse>('POST', '/v1/memory/feedback', {
+      agent_id: agentId,
+      memory_id: request.memory_id,
+      signal: request.signal,
+    });
   }
 
   // ===========================================================================
@@ -2705,9 +2735,13 @@ export class DakeraClient {
    * Get the full feedback history for a memory (INT-1).
    *
    * @param memoryId  The memory whose feedback history to retrieve.
+   * @param agentId   The agent that owns the memory (the server requires it).
    */
-  async getMemoryFeedbackHistory(memoryId: string): Promise<FeedbackHistoryResponse> {
-    return this.request<FeedbackHistoryResponse>('GET', `/v1/memories/${encodeURIComponent(memoryId)}/feedback`);
+  async getMemoryFeedbackHistory(memoryId: string, agentId: string): Promise<FeedbackHistoryResponse> {
+    return this.request<FeedbackHistoryResponse>(
+      'GET',
+      `/v1/memories/${encodeURIComponent(memoryId)}/feedback?agent_id=${encodeURIComponent(agentId)}`
+    );
   }
 
   /**
@@ -2718,9 +2752,10 @@ export class DakeraClient {
    * human-readable {@link TifScore.classification}.
    *
    * @param memoryId  The memory to score.
+   * @param agentId   The agent that owns the memory (the server requires it).
    */
-  async evaluateTif(memoryId: string): Promise<TifScore> {
-    const history = await this.getMemoryFeedbackHistory(memoryId);
+  async evaluateTif(memoryId: string, agentId: string): Promise<TifScore> {
+    const history = await this.getMemoryFeedbackHistory(memoryId, agentId);
     return computeTifScore(history);
   }
 
@@ -4365,9 +4400,11 @@ export class DakeraClient {
    *
    * `GET /v1/namespaces/{namespace}/memory_policy`
    *
-   * When no explicit policy has been configured the server returns COG-1
-   * defaults: working=4 h, episodic=30 d, semantic=365 d, procedural=730 d;
-   * exponential / power_law / logarithmic / flat decay; SR factor 1.0.
+   * When no explicit policy has been stored the server answers what the
+   * namespace's memories get without one: no TTL by memory type (the four
+   * `*_ttl_seconds` are `null`), the server's decay curve for every type, no
+   * spaced repetition (factor 0), and consolidation, store-time dedup and
+   * rate limits off.
    *
    * @param namespace  Namespace to inspect.
    */

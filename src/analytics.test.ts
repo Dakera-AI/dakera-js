@@ -510,7 +510,7 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
         topics: ['typescript', 'testing'],
       }));
 
-      const result = await client.summarize({ agent_id: 'agent-1', limit: 20 });
+      const result = await client.summarize({ agent_id: 'agent-1', memory_ids: ['m1', 'm2'] });
 
       expect(result.summary).toContain('TypeScript');
       expect(result.topics).toContain('testing');

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`consolidate()`** matches the server's `ConsolidateRequest` (`agent_id`, `memory_ids?`,
+  `threshold`, `target_type?`): `ConsolidateRequest` gains `memory_ids` and `target_type` and
+  drops `memory_type` / `config` (never read by the server, and no longer sent). The server
+  merges the memories and deletes the sources and has no dry run, so `dry_run: true` now throws
+  a `ValidationError` instead of merging.
+- **`memoryFeedback()`**: `MemoryFeedbackRequest` sends the required `signal`
+  (`upvote` | `downvote` | `flag` | `positive` | `negative`) instead of `feedback` /
+  `relevance_score`, and `MemoryFeedbackResponse` is the server's
+  `{ memory_id, new_importance, signal }`.
+- **`getMemoryFeedbackHistory(memoryId, agentId)`** and **`evaluateTif(memoryId, agentId)`**
+  take the `agent_id` the server requires (calls without it were answered `400`).
+- **`SummarizeRequest`**: `memory_ids` is required and `dry_run` is removed (the server has
+  neither optional ids nor a dry run).
+- Docs: `MemoryPolicy` TTLs default to no TTL by type (`null`), not 4 h / 30 d / 365 d /
+  730 d, and `dedup_threshold` to `0.95`; `getMemoryPolicy()` describes what a namespace
+  without a stored policy gets. Recall `importance_weighted` defaults to `false` and
+  `include_associated` to `true` on server v0.12.4+; `tags` filters match memories carrying
+  any of the tags.
+
 ## [0.12.3] - 2026-10-22
 
 Server v0.12.3 support (Dakera-AI/dakera#917, #920, #930, #932, #933, #938) and an SDK security / robustness audit. Compatible

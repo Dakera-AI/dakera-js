@@ -1001,17 +1001,25 @@ export interface MemoryRecallOptions {
   memory_type?: string;
   /** Recall within one session only. */
   session_id?: string;
-  /** Only memories carrying these tags. */
+  /** Only memories carrying at least one of these tags. */
   tags?: string[];
   /** Minimum importance threshold. */
   min_importance?: number;
-  /** Importance-weighted re-ranking (server default `true`). */
+  /**
+   * Flat importance-heavy re-ranking weights. Omitted = the server default
+   * (`DAKERA_RECALL_IMPORTANCE_WEIGHTED`, `false` since server v0.12.4: the
+   * query-type weights; earlier servers defaulted to `true`).
+   */
   importance_weighted?: boolean;
-  /** COG-2: include KG-linked memories in `associated_memories` (default false). */
+  /**
+   * COG-2: include KG-linked memories in `associated_memories`. Omitted = the
+   * server default (`DAKERA_RECALL_INCLUDE_ASSOCIATED`, `true` since server
+   * v0.12.4); send `false` to turn it off.
+   */
   include_associated?: boolean;
   /** COG-2: max associated memories (default 10, max 10). */
   associated_memories_cap?: number;
-  /** KG-3: traversal depth 1–3 (default 1); requires `include_associated`. */
+  /** KG-3: traversal depth 1–3 (default 1); requires associated memories to be on. */
   associated_memories_depth?: number;
   /** KG-3: minimum edge weight for KG traversal (default 0.0). */
   associated_memories_min_weight?: number;
@@ -1103,7 +1111,7 @@ export interface SearchMemoriesOptions {
   memory_type?: string;
   /** Only memories of this session. */
   session_id?: string;
-  /** Only memories carrying these tags. */
+  /** Only memories carrying at least one of these tags. */
   tags?: string[];
   /** Minimum importance. */
   min_importance?: number;
@@ -1249,16 +1257,33 @@ export interface UpdateImportanceRequest {
   importance: number;
 }
 
-/** Request to consolidate memories */
+/**
+ * Request to consolidate memories (`POST /v1/memory/consolidate`).
+ *
+ * The server merges the memories into one new memory and **deletes the
+ * sources**; there is no dry run.
+ */
 export interface ConsolidateRequest {
-  /** Filter by memory type */
-  memory_type?: string;
-  /** Similarity threshold */
+  /**
+   * Consolidate exactly these memories. Omitted or empty: the server picks the
+   * most important memory that has neighbours at cosine >= `threshold` and
+   * merges it with up to 4 of them.
+   */
+  memory_ids?: MemoryId[];
+  /**
+   * Cosine similarity a neighbour needs for auto-detection, in (0, 1]
+   * (server default: 0.85). Not used when `memory_ids` names memories.
+   */
   threshold?: number;
-  /** Dry run mode */
+  /** Memory type of the consolidated memory. */
+  target_type?: MemoryType;
+  /**
+   * Not supported: the server has no dry run for this route and would merge
+   * (and delete) the memories. `true` makes {@link DakeraClient.consolidate}
+   * throw instead of sending the request.
+   * @deprecated
+   */
   dry_run?: boolean;
-  /** Optional DBSCAN algorithm config (CE-6) */
-  config?: ConsolidationConfig;
 }
 
 /** Response from consolidation */
@@ -1273,22 +1298,22 @@ export interface ConsolidateResponse {
   log?: ConsolidationLogEntry[];
 }
 
-/** Request for memory feedback */
+/** Request for memory feedback (`POST /v1/memory/feedback`). */
 export interface MemoryFeedbackRequest {
   /** Memory ID */
   memory_id: MemoryId;
-  /** Feedback text */
-  feedback: string;
-  /** Optional relevance score */
-  relevance_score?: number;
+  /** Feedback signal (see {@link FeedbackSignal}). */
+  signal: FeedbackSignal;
 }
 
-/** Response from feedback */
+/** Response from `POST /v1/memory/feedback`. */
 export interface MemoryFeedbackResponse {
-  /** Status */
-  status: string;
-  /** Updated importance */
-  updated_importance?: number;
+  /** ID of the memory that was updated. */
+  memory_id: MemoryId;
+  /** Importance after the feedback was applied (0.0–1.0). */
+  new_importance: number;
+  /** The feedback signal that was recorded. */
+  signal: FeedbackSignal;
 }
 
 // =============================================================================
@@ -1681,9 +1706,9 @@ export interface FullKnowledgeGraphRequest {
 /** Request to summarize memories */
 export interface SummarizeRequest {
   agent_id: AgentId;
-  memory_ids?: MemoryId[];
+  /** The memories to summarize (required by the server). */
+  memory_ids: MemoryId[];
   target_type?: string;
-  dry_run?: boolean;
 }
 
 /** Response from summarization */
@@ -3318,14 +3343,26 @@ export type DecayStrategyName =
  */
 export interface MemoryPolicy {
   // Differential TTLs ---------------------------------------------------------
-  /** Default TTL for `working` memories in seconds (default: 14 400 = 4 h). */
-  working_ttl_seconds?: number;
-  /** Default TTL for `episodic` memories in seconds (default: 2 592 000 = 30 d). */
-  episodic_ttl_seconds?: number;
-  /** Default TTL for `semantic` memories in seconds (default: 31 536 000 = 365 d). */
-  semantic_ttl_seconds?: number;
-  /** Default TTL for `procedural` memories in seconds (default: 63 072 000 = 730 d). */
-  procedural_ttl_seconds?: number;
+  /**
+   * TTL in seconds for `working` memories stored without one. Unset / `null`
+   * (the server default) = they never expire by type.
+   */
+  working_ttl_seconds?: number | null;
+  /**
+   * TTL in seconds for `episodic` memories stored without one. Unset / `null`
+   * (the server default) = they never expire by type.
+   */
+  episodic_ttl_seconds?: number | null;
+  /**
+   * TTL in seconds for `semantic` memories stored without one. Unset / `null`
+   * (the server default) = they never expire by type.
+   */
+  semantic_ttl_seconds?: number | null;
+  /**
+   * TTL in seconds for `procedural` memories stored without one. Unset /
+   * `null` (the server default) = they never expire by type.
+   */
+  procedural_ttl_seconds?: number | null;
 
   // Decay curves --------------------------------------------------------------
   /** Decay strategy for `working` memories (default: `"exponential"`). */
@@ -3388,7 +3425,7 @@ export interface MemoryPolicy {
    */
   dedup_on_store?: boolean;
   /**
-   * Cosine-similarity threshold for store-time deduplication (default: `0.92`).
+   * Cosine-similarity threshold for store-time deduplication (default: `0.95`).
    *
    * Memories with similarity ≥ this value are considered duplicates and the
    * incoming memory is dropped. Only active when `dedup_on_store` is `true`.

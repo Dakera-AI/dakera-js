@@ -144,7 +144,7 @@ describe('Knowledge Graph Methods', () => {
         new_memory_id: 'mem-sum-1',
       }));
 
-      const result = await client.summarize({ agent_id: 'a', dry_run: false });
+      const result = await client.summarize({ agent_id: 'a', memory_ids: ['m1', 'm2'] });
 
       expect(result.summary).toContain('developer');
       expect(result.source_count).toBe(5);
@@ -161,20 +161,12 @@ describe('Knowledge Graph Methods', () => {
         agent_id: 'a',
         memory_ids: ['m1', 'm2'],
         target_type: 'semantic',
-        dry_run: true,
       });
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.memory_ids).toEqual(['m1', 'm2']);
       expect(body.target_type).toBe('semantic');
-      expect(body.dry_run).toBe(true);
-    });
-
-    it('should handle response without new_memory_id (dry run)', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ summary: 'dry run result', source_count: 3 }));
-
-      const result = await client.summarize({ agent_id: 'a', dry_run: true });
-      expect(result.new_memory_id).toBeUndefined();
+      expect(body.dry_run).toBeUndefined();
     });
   });
 
