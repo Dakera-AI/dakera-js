@@ -1461,7 +1461,10 @@ export interface SessionMemoriesOptions {
 
 /** Options for {@link DakeraClient.agentMemories}. */
 export interface AgentMemoriesOptions {
-  /** Not a server filter on `GET /v1/agents/{id}/memories`; kept for compatibility. */
+  /**
+   * Only memories of this type (`episodic`, `semantic`, `procedural`,
+   * `working`). Applied by servers from 0.12.4; earlier ones list every type.
+   */
   memory_type?: string;
   /** Page size (server default 50, at most 1000). */
   limit?: number;
@@ -3204,6 +3207,8 @@ export const AUDIT_EVENT_RESTORED = 'restored';
 export interface AuditListResponse {
   events: AuditEvent[];
   count: number;
+  /** Pass as `cursor` for the next page; absent on the last (server 0.12.4+). */
+  next_cursor?: string;
 }
 
 /** Result of `exportAudit` (`GET /v1/audit/export`, OBS-1). */

@@ -4205,6 +4205,9 @@ export class DakeraClient {
    * @param fromTs    Unix millisecond lower bound (inclusive).
    * @param toTs      Unix millisecond upper bound (inclusive).
    * @param limit     Maximum number of events to return.
+   * @param cursor    The previous page's `next_cursor`: the events after it
+   *                  (older), newest first. Server 0.12.4+ (an older one
+   *                  ignores it and answers the first page again).
    */
   async listAuditEvents(opts?: {
     agentId?: string;
@@ -4212,6 +4215,7 @@ export class DakeraClient {
     fromTs?: number;
     toTs?: number;
     limit?: number;
+    cursor?: string;
   }): Promise<AuditListResponse> {
     const params = new URLSearchParams();
     if (opts?.agentId) params.set('agent_id', opts.agentId);
@@ -4219,6 +4223,7 @@ export class DakeraClient {
     if (opts?.fromTs !== undefined) params.set('from', String(opts.fromTs));
     if (opts?.toTs !== undefined) params.set('to', String(opts.toTs));
     if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.cursor) params.set('cursor', opts.cursor);
     const qs = params.toString();
     return this.request<AuditListResponse>('GET', qs ? `/v1/audit?${qs}` : '/v1/audit');
   }
