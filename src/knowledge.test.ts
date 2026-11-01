@@ -139,23 +139,27 @@ describe('Knowledge Graph Methods', () => {
   describe('summarize', () => {
     it('should POST to /v1/knowledge/summarize and return summary', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        summary: 'User is a developer working on AI products.',
-        source_count: 5,
-        new_memory_id: 'mem-sum-1',
+        summary_memory: {
+          id: 'mem-sum-1',
+          content: 'User is a developer working on AI products.',
+          memory_type: 'semantic',
+          importance: 0.6,
+        },
+        source_count: 2,
       }));
 
       const result = await client.summarize({ agent_id: 'a', memory_ids: ['m1', 'm2'] });
 
-      expect(result.summary).toContain('developer');
-      expect(result.source_count).toBe(5);
-      expect(result.new_memory_id).toBe('mem-sum-1');
+      expect(result.summary_memory.content).toContain('developer');
+      expect(result.summary_memory.id).toBe('mem-sum-1');
+      expect(result.source_count).toBe(2);
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/knowledge/summarize');
       expect(opts.method).toBe('POST');
     });
 
     it('should pass memory_ids and target_type when provided', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ summary: 'x', source_count: 2 }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ summary_memory: { id: 's', content: 'x' }, source_count: 2 }));
 
       await client.summarize({
         agent_id: 'a',

@@ -2272,14 +2272,17 @@ describe('DakeraClient', () => {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
-          merged_count: 3,
-          clusters: 2,
+          consolidated_memory: { id: 'mem-merged', content: 'merged', memory_type: 'semantic', importance: 0.7 },
+          source_memory_ids: ['m1', 'm2', 'm3'],
+          memories_removed: 3,
         }),
       });
 
       const result = await client.consolidate('agent-1');
 
-      expect(result.merged_count).toBe(3);
+      expect(result.consolidated_memory.id).toBe('mem-merged');
+      expect(result.source_memory_ids).toEqual(['m1', 'm2', 'm3']);
+      expect(result.memories_removed).toBe(3);
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/memory/consolidate');
     });

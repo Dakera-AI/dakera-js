@@ -1266,8 +1266,10 @@ export interface UpdateImportanceRequest {
 export interface ConsolidateRequest {
   /**
    * Consolidate exactly these memories. Omitted or empty: the server picks the
-   * most important memory that has neighbours at cosine >= `threshold` and
-   * merges it with up to 4 of them.
+   * most important memory that has neighbours at cosine >= `threshold` (same
+   * type; same session unless cross-session consolidation is configured) and
+   * merges it with up to 4 of them; it answers 400 when no memories are that
+   * similar.
    */
   memory_ids?: MemoryId[];
   /**
@@ -1288,14 +1290,12 @@ export interface ConsolidateRequest {
 
 /** Response from consolidation */
 export interface ConsolidateResponse {
-  /** Number of source memories removed during consolidation */
-  memories_removed: number;
-  /** IDs of the source memories that were consolidated */
+  /** The merged memory the server stored. */
+  consolidated_memory: Memory;
+  /** IDs of the source memories that were merged (and deleted). */
   source_memory_ids: MemoryId[];
-  /** The resulting consolidated memory (if any) */
-  consolidated_memory?: Memory;
-  /** Step-by-step consolidation log (CE-6) */
-  log?: ConsolidationLogEntry[];
+  /** Number of source memories deleted. */
+  memories_removed: number;
 }
 
 /** Request for memory feedback (`POST /v1/memory/feedback`). */
@@ -1711,11 +1711,12 @@ export interface SummarizeRequest {
   target_type?: string;
 }
 
-/** Response from summarization */
+/** Response from `POST /v1/knowledge/summarize`. */
 export interface SummarizeResponse {
-  summary: string;
+  /** The summary memory the server stored. */
+  summary_memory: Memory;
+  /** Number of memories summarized. */
   source_count: number;
-  new_memory_id?: MemoryId;
 }
 
 /** Request to deduplicate memories */

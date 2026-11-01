@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take the `agent_id` the server requires (calls without it were answered `400`).
 - **`SummarizeRequest`**: `memory_ids` is required and `dry_run` is removed (the server has
   neither optional ids nor a dry run).
+- **`SummarizeResponse`** is the server's `{ summary_memory: Memory, source_count }` (was
+  `summary` / `new_memory_id`, which the server never sent).
+- **`ConsolidateResponse`** is the server's `{ consolidated_memory, source_memory_ids,
+  memories_removed }`: `consolidated_memory` is always present and `log` is removed (the server
+  never sent it; the `ConsolidationLogEntry` type stays exported).
 - Docs: `MemoryPolicy` TTLs default to no TTL by type (`null`), not 4 h / 30 d / 365 d /
   730 d, and `dedup_threshold` to `0.95`; `getMemoryPolicy()` describes what a namespace
   without a stored policy gets. Recall `importance_weighted` defaults to `false` and
