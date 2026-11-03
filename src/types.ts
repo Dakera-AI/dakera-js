@@ -1419,6 +1419,12 @@ export interface SessionStartResponse {
 export interface SessionEndResponse {
   session: Session;
   memory_count: number;
+  /**
+   * Server v0.12.4+: present when the `auto_summarize` summary memory could
+   * not be stored yet — the server logs it and stores it later (after a
+   * restart too). The session is ended either way.
+   */
+  summary_pending?: string;
 }
 
 /** Response from `POST /v1/sessions/{id}/touch` (server v0.12.2+). */
