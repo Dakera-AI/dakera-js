@@ -128,6 +128,54 @@ you `break` out of the loop.
 
 ---
 
+## What's new for Dakera server v0.12.4
+
+This SDK release (0.12.4) targets Dakera server **v0.12.4** and stays **compatible with v0.12.0–v0.12.3 servers**:
+new request fields are left out when unset, new response fields are optional, and the one new route answers 404
+on an older server. The features below need a **v0.12.4+** server.
+
+- **Forget by meaning** — `forgetMemories(agentId, request)` takes the usual filters (`memory_ids`,
+  `memory_type`, `session_id`, `tags`, `below_importance`) and:
+  - `about`: forget what a description is about ("I love sushi"), judged by the server's cross-encoder
+    (`min_score`, default 0.5; `limit`, default 10, at most 50); `forgotten_ids` lists them, most relevant first;
+  - `request`: a user's request to forget, as said, in any language; `intent` says how it was read, and a
+    message that is not a request forgets nothing;
+  - `until` (keep what was said after the request), `restorable: true` (a copy in the agent's trash:
+    `listDeduplicated()` shows it with its `content`, `restoreDeduplicated()` puts it back) and `dry_run: true`.
+
+  An older server ignores these fields, so combined with a filter they would forget everything the filter
+  selects: the SDK then checks the server version first and refuses on a server before v0.12.4.
+- **`detectForgetRequests(texts)`** — whether each message asks to forget something said, without reading any
+  memory. Stores report it too: `storeMemory()` answers `forget_request`, `storeMemoriesBatch()`
+  `forget_requests` (and `duplicates`, the items a deduplicating memory policy did not store).
+- **Recall** — associated memories are on by default and `importance_weighted` defaults to `false` (the SDK
+  sends neither unless set); `instructions` returns the agent's standing instructions that fit the query;
+  `degraded` names any part of the recall that could not be served; `rerank_head` sets the reranked head.
+- **`getMemory(agentId, id, { projection_days: 30 })`** — the memory with `strength_projection`, its importance
+  for each of the next days under its namespace's decay policy.
+- **Async import** — `importMemories(data, 'jsonl', agentId, undefined, { async: true })` answers the running
+  job at once; `waitForImportJob(job_id)` waits for it. `importMemories()` / `exportMemories()` now speak the
+  server's format (a multipart upload; the export file itself, with `raw` and `skipped`).
+- `listAuditEvents({ cursor })` pages with `next_cursor`; `agentMemories({ memory_type })` and
+  `agentSessions({ active_only })` filter; `endSession()` honours `auto_summarize` and may answer
+  `summary_pending`; `getNamespaceEntityConfig()` says where the setting comes from (`source`);
+  `getMemoryPolicy()` answers `stored`; link `label`s are kept; `extractEntities()` answers `extractor` and
+  `warnings`; analytics honour `period` and `namespace`.
+- **Admin** — autopilot `consolidation_mode` (`off` | `report` | `merge`), pass `failures`, decay
+  `cycles_failed`, TTL cleanup `failed`, derivation `entity_tagging`, `health()` `degraded` /
+  `config_warnings`, `warmCache()` by `queryVector`, `adminRestoreBackup({ point_in_time })`. Key revocation and
+  deactivation answer `202` (resolved; the `message` says it is not stored yet) or `409` (`ConflictError`).
+- **Errors** — a namespace whose deletion is still being cleaned up answers `503` with `Retry-After: 5`; the
+  client retries after the delay and keeps it in `retryAfterSeconds`.
+
+```typescript
+const check = await client.detectForgetRequests([userMessage]);
+if (check.results[0].is_request) {
+  const res = await client.forgetMemories('my-agent', { request: userMessage, restorable: true });
+  console.log(res.intent, res.forgotten_ids);
+}
+```
+
 ## What's new for Dakera server v0.12.3
 
 This SDK release (0.12.3) targets Dakera server **v0.12.3** and stays **compatible with v0.12.0–v0.12.2 servers**:

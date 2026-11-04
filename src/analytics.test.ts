@@ -505,15 +505,14 @@ describe('Analytics, Vector Bulk, KG, and Memory Extended Methods', () => {
   describe('summarize', () => {
     it('should summarize memories', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        summary: 'The agent has learned about TypeScript and testing.',
-        memory_count: 15,
-        topics: ['typescript', 'testing'],
+        summary_memory: { id: 'mem-sum', content: 'The agent has learned about TypeScript and testing.' },
+        source_count: 2,
       }));
 
-      const result = await client.summarize({ agent_id: 'agent-1', limit: 20 });
+      const result = await client.summarize({ agent_id: 'agent-1', memory_ids: ['m1', 'm2'] });
 
-      expect(result.summary).toContain('TypeScript');
-      expect(result.topics).toContain('testing');
+      expect(result.summary_memory.content).toContain('TypeScript');
+      expect(result.source_count).toBe(2);
       const [url, opts] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/knowledge/summarize');
       expect(opts.method).toBe('POST');

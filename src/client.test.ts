@@ -1439,14 +1439,29 @@ describe('DakeraClient', () => {
       mockFetch.mockResolvedValueOnce(
         new Response(JSON.stringify(historyResponse), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) })
       );
-      const result = await client.getMemoryFeedbackHistory('mem-abc');
+      const result = await client.getMemoryFeedbackHistory('mem-abc', 'agent-1');
       expect(result.memory_id).toBe('mem-abc');
       expect(result.entries).toHaveLength(2);
       expect(result.entries[0].signal).toBe('upvote');
       expect(result.entries[1].signal).toBe('downvote');
       const [url, opts] = mockFetch.mock.calls[0];
-      expect(url).toContain('/v1/memories/mem-abc/feedback');
+      expect(url).toContain('/v1/memories/mem-abc/feedback?agent_id=agent-1');
       expect(opts.method).toBe('GET');
+    });
+
+    it('memoryFeedback POSTs agent_id, memory_id and signal to /v1/memory/feedback', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ memory_id: 'mem-abc', new_importance: 0.575, signal: 'upvote' }), {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+      const result = await client.memoryFeedback('agent-1', { memory_id: 'mem-abc', signal: 'upvote' });
+      expect(result.new_importance).toBe(0.575);
+      expect(result.signal).toBe('upvote');
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain('/v1/memory/feedback');
+      expect(JSON.parse(opts.body as string)).toEqual({ agent_id: 'agent-1', memory_id: 'mem-abc', signal: 'upvote' });
     });
 
     it('getAgentFeedbackSummary GETs /v1/agents/:id/feedback/summary', async () => {
@@ -2257,16 +2272,43 @@ describe('DakeraClient', () => {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
-          merged_count: 3,
-          clusters: 2,
+          consolidated_memory: { id: 'mem-merged', content: 'merged', memory_type: 'semantic', importance: 0.7 },
+          source_memory_ids: ['m1', 'm2', 'm3'],
+          memories_removed: 3,
         }),
       });
 
       const result = await client.consolidate('agent-1');
 
-      expect(result.merged_count).toBe(3);
+      expect(result.consolidated_memory.id).toBe('mem-merged');
+      expect(result.source_memory_ids).toEqual(['m1', 'm2', 'm3']);
+      expect(result.memories_removed).toBe(3);
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/v1/memory/consolidate');
+    });
+
+    it('sends only agent_id, memory_ids, threshold and target_type', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ source_memory_ids: ['m1', 'm2'], memories_removed: 2 }),
+      });
+
+      await client.consolidate('agent-1', {
+        memory_ids: ['m1', 'm2'],
+        threshold: 0.9,
+        target_type: 'semantic',
+        // not server fields: must not be sent
+        ...({ memory_type: 'episodic', config: { eps: 0.1 } } as object),
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+      expect(body).toEqual({ agent_id: 'agent-1', memory_ids: ['m1', 'm2'], threshold: 0.9, target_type: 'semantic' });
+    });
+
+    it('throws on dry_run: true without sending (the server has no dry run)', async () => {
+      await expect(client.consolidate('agent-1', { dry_run: true })).rejects.toThrow(/no dry run/);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 

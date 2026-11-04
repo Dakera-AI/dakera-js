@@ -531,6 +531,13 @@ describe('v0.12.0 route sweep fixes', () => {
     expect(call().url).toContain('/v1/audit?agent_id=a');
   });
 
+  it('listAuditEvents pages with the server cursor', async () => {
+    mockFetch.mockResolvedValueOnce(ok({ events: [], count: 0, next_cursor: '1747000000.42' }));
+    const r = await client.listAuditEvents({ cursor: '1747000001.7', limit: 1 });
+    expect(call().url).toContain('cursor=1747000001.7');
+    expect(r.next_cursor).toBe('1747000000.42');
+  });
+
   it('no longer exposes methods whose routes the server never served', () => {
     for (const name of ['fetch', 'flush', 'configureTtl', 'listExtractProviders']) {
       expect((client as unknown as Record<string, unknown>)[name]).toBeUndefined();

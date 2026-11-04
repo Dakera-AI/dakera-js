@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - Unreleased
+
+Server v0.12.4 support. Compatible with v0.12.0–v0.12.3 servers: new request fields are left out when
+unset (older servers ignore them), new response fields are optional, and the one new route
+(`POST /v1/memory/forget/detect`) answers 404 on an older server. The new features need a v0.12.4+ server.
+
+### Added
+
+- **Forget by meaning** — `forgetMemories(agentId, request)` (`POST /v1/memory/forget`, `ForgetRequest` /
+  `ForgetResponse`): the filters of every server (`memory_ids`, `memory_type`, `session_id`, `tags`,
+  `below_importance`) and, server v0.12.4+, `about` (forget what a description is about, judged by the
+  server's cross-encoder: `min_score`, `limit`), `request` (a user's request to forget, as said, in any
+  language; the answer's `intent` says how it was read), `until`, `restorable` (a copy in the agent's trash,
+  kind `deletion`, restorable with `restoreDeduplicated()`) and `dry_run` (`forgotten_ids` without
+  forgetting). `about` with `request` throws a `ValidationError`. Because an older server ignores these
+  fields and would forget everything the other filters select (a dry run would delete), combining one with
+  a filter first checks the server version (`capabilities()`, cached) and throws a `ValidationError` on a
+  server before v0.12.4 without sending the forget.
+- **`detectForgetRequests(texts)`** (`POST /v1/memory/forget/detect`, read scope): whether each message asks
+  to forget something said (`ForgetDetectResponse`: `model`, `threshold`, `sentence_threshold`,
+  `results[]` of `ForgetIntent`). Read-only, so it is retried like a recall.
+- `StoreMemoryResponse.forget_request` (`ForgetIntent`); `BatchStoreMemoryResponse.forget_requests`
+  (`StoredForgetRequest[]`) and `duplicates` (`BatchDuplicate[]`: items a deduplicating memory policy did
+  not store).
+- **Recall**: `rerank_head` option; `RecallResponse.instructions` (standing instructions, flattened like
+  `memories`, `retrieval: "instruction"`) and `degraded` (parts of the recall that could not be served).
+- **`getMemory(agentId, memoryId, { projection_days })`** (1–365, checked before sending): the memory with
+  `strength_projection` (`StrengthPoint[]`: its importance for each of the next N days). `getMemory()` returns
+  `MemoryWithProjection` (a `Memory`).
+- **Async import**: `importMemories(data, format, agentId, namespace, { async: true })` answers the running job
+  at once; `waitForImportJob(jobId, { intervalMs, timeoutMs, signal })` polls `importJobStatus()` until it is
+  `done` or `failed`. `ImportJobStatus.status` is typed `ImportJobState`.
+- **`listAuditEvents({ cursor })`** and `AuditListResponse.next_cursor` (pages newest first; absent on the
+  last page).
+- `DeduplicatedMemory.content` and the `deletion` kind; `NamespaceEntityConfig.source` (`namespace` |
+  `server_default`); `MemoryPolicy.stored` (read only: `setMemoryPolicy()` never sends it);
+  `EntityExtractionResponse.count`, `extractor` and `warnings`; `GraphEdge.label` and
+  `GraphLinkResponse.label`; `DeduplicateResponse.groups_failed`; `CrossAgentNetworkResponse.unavailable`;
+  `CompressResponse.deprecation_skipped` / `deprecation_error`; `AnalyticsOverview.period` / `namespace`;
+  `SessionEndResponse.summary_pending`.
+- **Admin**: `AutoPilotConfig` / `AutoPilotConfigRequest.consolidation_mode` (`AutoPilotConsolidationMode`,
+  `AUTOPILOT_CONSOLIDATION_MODES`; an unknown mode throws before sending); the dedup / consolidation results
+  and snapshots gain `failures` (consolidation also `clusters_found`, `memories_in_clusters`, `mode`);
+  `DecayStatsResponse.cycles_failed` and `last_cycle.failures`; `TtlCleanupResponse.failed`;
+  `DerivationStatus.entity_tagging` (`EntityTaggingStatus`); `HealthResponse.degraded` and
+  `config_warnings` (`HealthComponent`); `warmCache()` options `queryVector`, `minScoreThreshold` and
+  `recentlyAccessedWithin`; `adminRestoreBackup()` takes `point_in_time` without `backup_id` (one of the
+  two is required).
+
+### Changed
+
+- `recall()` sends neither `importance_weighted` nor `include_associated` unless set, so the server's
+  defaults apply: since server v0.12.4 `importance_weighted` defaults to `false` and associated memories
+  are returned by default (send `include_associated: false` to turn them off).
+- `agentMemories({ memory_type })` and `agentSessions({ active_only })` filter on servers from v0.12.4
+  (earlier servers ignored both).
+- `endSession({ auto_summarize })` is honoured by servers from v0.12.4: omitted, a summary memory for a
+  session with more than 3 memories; `true` for any session with memories; `false` never.
+- Errors: every error keeps the server's `Retry-After` in `retryAfterSeconds` (`RateLimitError.retryAfter`
+  for 429). A v0.12.4 server answers `503` + `Retry-After: 5` while a deleted namespace's name is fenced, and
+  `202` for an admin change applied on every node but not stored yet (the call resolves; the `message`
+  says so); both are handled as before (503 retried after the delay, 202 a success).
+
+### Fixed
+
+- **`importMemories()`** uploads the file as `multipart/form-data` with `agent_id` and `format` in the query,
+  as the server reads them (it sent a JSON body, which the server refused), requires `agentId` and returns
+  the job status (`imported_count` / `skipped_count` from the server's `imported` / `skipped`, plus `job_id`,
+  `status`, `format`, `total`, `started_at`, `finished_at`). `namespace` is not read by the server and no
+  longer sent.
+- **`exportMemories()`** reads the export file the server answers (JSON lines, CSV, or the Mem0 / Zep
+  document) into `data`, with `raw` (the file) and `skipped` (`x-dakera-export-skipped`); it expected a JSON
+  envelope the server never sent. It requires `agentId`; `limit` is applied to `data`.
+- **`forget()`** is typed as the server's `{ deleted_count }` (`ForgetResponse`), not `{ status }`.
+- **`deleteKey()` / `deactivateKey()`** are typed as the server's `{ success, message }`
+  (`KeyChangeResponse`), not `{ status }` / `ApiKey`.
+
+- **`consolidate()`** matches the server's `ConsolidateRequest` (`agent_id`, `memory_ids?`,
+  `threshold`, `target_type?`): `ConsolidateRequest` gains `memory_ids` and `target_type` and
+  drops `memory_type` / `config` (never read by the server, and no longer sent). The server
+  merges the memories and deletes the sources and has no dry run, so `dry_run: true` now throws
+  a `ValidationError` instead of merging.
+- **`memoryFeedback()`**: `MemoryFeedbackRequest` sends the required `signal`
+  (`upvote` | `downvote` | `flag` | `positive` | `negative`) instead of `feedback` /
+  `relevance_score`, and `MemoryFeedbackResponse` is the server's
+  `{ memory_id, new_importance, signal }`.
+- **`getMemoryFeedbackHistory(memoryId, agentId)`** and **`evaluateTif(memoryId, agentId)`**
+  take the `agent_id` the server requires (calls without it were answered `400`).
+- **`SummarizeRequest`**: `memory_ids` is required and `dry_run` is removed (the server has
+  neither optional ids nor a dry run).
+- **`SummarizeResponse`** is the server's `{ summary_memory: Memory, source_count }` (was
+  `summary` / `new_memory_id`, which the server never sent).
+- **`ConsolidateResponse`** is the server's `{ consolidated_memory, source_memory_ids,
+  memories_removed }`: `consolidated_memory` is always present and `log` is removed (the server
+  never sent it; the `ConsolidationLogEntry` type stays exported).
+- Docs: `MemoryPolicy` TTLs default to no TTL by type (`null`, which the type now allows), not
+  4 h / 30 d / 365 d / 730 d, and `dedup_threshold` to `0.95`; `getMemoryPolicy()` describes what a
+  namespace without a stored policy gets. `tags` filters match memories carrying any of the tags.
+
 ## [0.12.3] - 2026-10-22
 
 Server v0.12.3 support (Dakera-AI/dakera#917, #920, #930, #932, #933, #938) and an SDK security / robustness audit. Compatible
