@@ -169,6 +169,12 @@ export interface WarmCacheRequest {
   accessPattern?: AccessPatternHint;
   /** Maximum vectors to warm */
   maxVectors?: number;
+  /** Server v0.12.4+: warm the records nearest this vector. */
+  queryVector?: number[];
+  /** Server v0.12.4+, with `queryVector`: only records at or above this similarity. */
+  minScoreThreshold?: number;
+  /** Only records accessed within this many seconds (acted on since server v0.12.4). */
+  recentlyAccessedWithin?: number;
 }
 
 /** Cache warming response */
@@ -179,7 +185,10 @@ export interface WarmCacheResponse {
   entries_warmed: number;
   /** Number of entries already warm (skipped) */
   entries_skipped: number;
-  /** Job ID for tracking background operations */
+  /**
+   * Job ID of a `background` warm: `GET /ops/jobs/{id}` reports its progress
+   * (a real job since server v0.12.4).
+   */
   job_id?: string;
   /** Status message */
   message: string;
@@ -325,6 +334,29 @@ export interface HealthResponse {
   uptime?: number;
   /** Git commit SHA baked into the binary at build time. Available since server v0.11.84. */
   build_sha?: string;
+  /**
+   * v0.12: every component running degraded, with why (empty when none).
+   * Server v0.12.4+ also lists `pending_writes` (changes answered `202` and
+   * not stored yet), `reembed_recovery` and `namespace_teardown` while they
+   * are retried.
+   */
+  degraded?: HealthComponent[];
+  /**
+   * v0.12: configuration the node started with although it is not what it
+   * should be (informational; never makes the node degraded). Server v0.12.4
+   * adds setup advice: `sizing`, `storage_in_memory`, `ephemeral_data_dir`.
+   */
+  config_warnings?: HealthComponent[];
+  /** Fields of newer servers. */
+  [key: string]: unknown;
+}
+
+/** One entry of {@link HealthResponse.degraded} / {@link HealthResponse.config_warnings}. */
+export interface HealthComponent {
+  /** Stable component name or warning category. */
+  component: string;
+  /** What is wrong and what the server does instead. */
+  reason: string;
 }
 
 /** Filter operators for metadata queries */
@@ -860,6 +892,34 @@ export interface Memory {
   content_truncated?: boolean;
 }
 
+/** One day of a {@link MemoryWithProjection.strength_projection} (server v0.12.4+). */
+export interface StrengthPoint {
+  /** Days from now (0 = today). */
+  day: number;
+  /** The memory's importance that day if nothing touches it. */
+  importance: number;
+}
+
+/** Options of {@link DakeraClient.getMemory}. */
+export interface GetMemoryOptions {
+  /**
+   * Server v0.12.4+: also project the memory's importance for each of the
+   * next N days (1–365) under its namespace's decay policy, in
+   * `strength_projection`. An older server ignores it.
+   */
+  projection_days?: number;
+}
+
+/** A memory as {@link DakeraClient.getMemory} returns it. */
+export interface MemoryWithProjection extends Memory {
+  /**
+   * Server v0.12.4+, with `projection_days`: the memory's importance for day
+   * 0 (today) to N if nothing touches it (the decay the background pass
+   * applies). Absent otherwise.
+   */
+  strength_projection?: StrengthPoint[];
+}
+
 /** A recalled memory with similarity score */
 export interface RecalledMemory {
   /** Memory ID */
@@ -955,10 +1015,11 @@ export function isNeighborhoodMode(value: unknown): value is NeighborhoodMode {
 }
 
 /**
- * `RecalledMemory.retrieval`: `"neighborhood"` today; kept open for newer
- * server strings.
+ * `RecalledMemory.retrieval`: `"neighborhood"` (session context) or, server
+ * v0.12.4+, `"instruction"` (a standing instruction, in
+ * {@link RecallResponse.instructions}); kept open for newer server strings.
  */
-export type RecallRetrieval = 'neighborhood' | (string & {});
+export type RecallRetrieval = 'neighborhood' | 'instruction' | (string & {});
 
 /** What the cross-encoder did for one recall or search (server v0.12+). */
 export interface RerankReport {
@@ -1037,6 +1098,14 @@ export interface MemoryRecallOptions {
   rerank?: boolean;
   /** Rerank at most this many candidates (server default: the whole pool). */
   rerank_candidates?: number;
+  /**
+   * Server v0.12.4+: with `rerank` and a `top_k` above it, the first N
+   * results are the cross-encoder's order, then the same recall without the
+   * cross-encoder, then the reranked remainder (each memory once). `0` = the
+   * reranked list alone. Omitted: the server default
+   * (`DAKERA_RERANK_HEAD`, 10). A `top_k` at or below it is unchanged.
+   */
+  rerank_head?: number;
   /** CE-14: fusion when routing is hybrid (server default `minmax`, not `rrf`). */
   fusion?: FusionStrategy;
   /** CE-17: explicit vector weight for hybrid routing (0.0–1.0). */
@@ -1071,8 +1140,27 @@ export interface RecallResponse {
    * `retrieval: "neighborhood"`.
    */
   memories: RecalledMemory[];
-  /** COG-2 / KG-3: KG associated memories at configurable depth (only present when include_associated was true) */
+  /**
+   * Knowledge-graph neighbours of the results (scores `0.0`),
+   * apart from the ranking. Present when associated memories are on: by
+   * default since server v0.12.4, only with `include_associated: true` before.
+   */
   associated_memories?: RecalledMemory[];
+  /**
+   * Server v0.12.4+: at most 3 of the agent's standing instructions (memories
+   * tagged `dakera-instruction`) that best fit the query, best first, each with
+   * `retrieval: "instruction"`. Only for a recall that does not narrow its
+   * results (`tags`, `memory_type`, `session_id`, `since`, `until`,
+   * `min_importance`). Absent when none.
+   */
+  instructions?: RecalledMemory[];
+  /**
+   * Server v0.12.4+: the parts of this recall that could not be served
+   * because a read failed, each with why (`graph: …`, `supersede: …`,
+   * `associated_memories: …`, `entity_search: …`, `instructions: …`, …). The
+   * results are still ranked without them. Absent when the recall is complete.
+   */
+  degraded?: string[];
   /**
    * Server v0.12.3+, `neighborhood_mode: "separate"` only: neighbourhood
    * context of the ranked results, each entry with `context_of` (the ranked
@@ -1151,6 +1239,13 @@ export interface StoreMemoryResponse extends EmbedTruncationReport {
    * (for example after the idle timeout). Absent without a started session.
    */
   session_state?: SessionState;
+  /**
+   * Server v0.12.4+: present when the content reads as a request to forget
+   * something said. The server reports it (and forgets what it means only
+   * when it is configured to); a client can act on it with
+   * {@link DakeraClient.forgetMemories} and `request`.
+   */
+  forget_request?: ForgetIntent;
 }
 
 /**
@@ -1357,7 +1452,12 @@ export interface EndSessionOptions {
    * Ignored when the session has already ended.
    */
   summary?: string;
-  /** Let the server generate the summary from the session's memories. */
+  /**
+   * The session's summary memory (an extract of its memories). Omitted: the
+   * server stores one for a session with more than 3 memories; `true`: for
+   * any session with memories; `false`: never. Honoured since server v0.12.4
+   * (earlier servers ignored it).
+   */
   auto_summarize?: boolean;
 }
 
@@ -1615,8 +1715,22 @@ export interface CompressResponse {
   originals_deprecated?: number;
   /** Ids of the summaries written. */
   summary_ids?: string[];
-  /** Ids of the originals deprecated. */
+  /**
+   * Ids of the originals deprecated. Server v0.12.4+: only those actually
+   * written (earlier servers listed every planned one).
+   */
   deprecated_ids?: string[];
+  /**
+   * Server v0.12.4+: originals left as they were because they changed since
+   * they were read (their summary stands beside them).
+   */
+  deprecation_skipped?: string[];
+  /**
+   * Server v0.12.4+: a deprecation write that failed (the summaries then
+   * stand beside the originals until the next compression); `null` / absent
+   * when every deprecation was written.
+   */
+  deprecation_error?: string | null;
   /**
    * Server v0.12.2+: summaries refused by validation or not storable; the
    * originals of their clusters were NOT deprecated.
@@ -1749,6 +1863,18 @@ export interface DeduplicateResponse {
    * write. Always 0 on a dry run.
    */
   duplicates_skipped_changed?: number;
+  /**
+   * Server v0.12.4+: groups whose merge failed (their duplicates are still
+   * stored), each with why. Absent when none.
+   */
+  groups_failed?: DuplicateGroupFailure[];
+}
+
+/** A duplicate group whose merge failed ({@link DeduplicateResponse.groups_failed}). */
+export interface DuplicateGroupFailure {
+  canonical_id: MemoryId;
+  duplicate_ids: MemoryId[];
+  reason: string;
 }
 
 // =============================================================================
@@ -1770,6 +1896,14 @@ export interface AnalyticsOverview {
   uptime_seconds: number;
   /** Server v0.12.2+: namespaces left out of the totals (absent when every namespace answered). */
   unavailable?: UnavailableNamespace[];
+  /** Server v0.12.4+: the latency window used (`period`; `5m` when not given). */
+  period?: string;
+  /**
+   * Server v0.12.4+: the namespace the figures are restricted to (`error_rate`,
+   * the cache figures and `uptime_seconds` stay node-wide). Absent for the
+   * whole server.
+   */
+  namespace?: string;
 }
 
 /** Latency analytics response */
@@ -1803,7 +1937,12 @@ export interface StorageAnalytics {
 
 /** Options for analytics queries */
 export interface AnalyticsOptions {
+  /** Time window (e.g. `5m`, `1h`, `24h`). Honoured since server v0.12.4 (ignored before). */
   period?: string;
+  /**
+   * Restrict the figures to one namespace (404 when unknown). Honoured since
+   * server v0.12.4 (ignored before).
+   */
   namespace?: string;
 }
 
@@ -2175,6 +2314,17 @@ export interface CrossAgentNetworkResponse {
   stats: AgentNetworkStats;
   /** Total number of memory nodes in the network (added in server v0.6.2). */
   node_count: number;
+  /**
+   * Server v0.12.4+: agents left out because their memories could not be
+   * read, with why. Absent when none (the network is complete).
+   */
+  unavailable?: AgentUnavailable[];
+}
+
+/** An agent left out of the cross-agent network ({@link CrossAgentNetworkResponse.unavailable}). */
+export interface AgentUnavailable {
+  agent_id: AgentId;
+  reason: string;
 }
 
 /** Request body for POST /v1/knowledge/network/cross-agent */
@@ -2306,14 +2456,29 @@ export type AutoPilotDedupMode = 'off' | 'report' | 'merge';
 /** Every {@link AutoPilotDedupMode}. */
 export const AUTOPILOT_DEDUP_MODES: readonly AutoPilotDedupMode[] = ['off', 'report', 'merge'];
 
+/**
+ * What the scheduled autopilot consolidation pass does (server v0.12.4+):
+ * `off`, `report` (the default: find the groups it would merge, change
+ * nothing) or `merge` (merge them and delete the originals, what every
+ * earlier release did).
+ */
+export type AutoPilotConsolidationMode = 'off' | 'report' | 'merge';
+/** Every {@link AutoPilotConsolidationMode}. */
+export const AUTOPILOT_CONSOLIDATION_MODES: readonly AutoPilotConsolidationMode[] = ['off', 'report', 'merge'];
+
 /** AutoPilot configuration */
 export interface AutoPilotConfig {
   enabled: boolean;
   dedup_threshold: number;
   dedup_interval_hours: number;
   consolidation_interval_hours: number;
-  /** Server v0.12.3+: the dedup mode ({@link AutoPilotDedupMode}). Absent on older servers. */
+  /**
+   * Server v0.12.3+: the dedup mode ({@link AutoPilotDedupMode}; `report` by
+   * default since v0.12.4). Absent on older servers.
+   */
   dedup_mode?: AutoPilotDedupMode | (string & {});
+  /** Server v0.12.4+: the consolidation mode ({@link AutoPilotConsolidationMode}). */
+  consolidation_mode?: AutoPilotConsolidationMode | (string & {});
   /** Server v0.12.3+: whether dedup may fold memories of different sessions (default false). */
   dedup_cross_session?: boolean;
   /** Server v0.12.3+: whether consolidation may merge memories of different sessions (default false). */
@@ -2332,6 +2497,13 @@ export interface DedupResultSnapshot {
   duplicates_removed: number;
   /** Server v0.12.3+: duplicates the pass found (in `report` mode none is removed). */
   duplicates_found?: number;
+  /**
+   * Server v0.12.4+: what the pass could not do (a namespace or content it
+   * could not read, a search or merge that failed), each with its namespace
+   * and why; at most 20. The counts are then partial. Absent when the pass did
+   * everything.
+   */
+  failures?: string[];
 }
 
 /** Result snapshot from a consolidation cycle */
@@ -2340,6 +2512,12 @@ export interface ConsolidationResultSnapshot {
   memories_scanned: number;
   clusters_merged: number;
   memories_consolidated: number;
+  /** Server v0.12.4+: groups the pass found (in `report` mode none is merged). */
+  clusters_found?: number;
+  /** Server v0.12.4+: memories in those groups. */
+  memories_in_clusters?: number;
+  /** Server v0.12.4+: what the pass could not do (see {@link DedupResultSnapshot.failures}). */
+  failures?: string[];
 }
 
 /** PILOT-1: AutoPilot status response */
@@ -2361,6 +2539,8 @@ export interface AutoPilotConfigRequest {
   consolidation_interval_hours?: number;
   /** Server v0.12.3+: `off`, `report` or `merge`. */
   dedup_mode?: AutoPilotDedupMode;
+  /** Server v0.12.4+: `off`, `report` or `merge` ({@link AutoPilotConsolidationMode}). */
+  consolidation_mode?: AutoPilotConsolidationMode;
   /** Server v0.12.3+: let dedup fold memories of different sessions. */
   dedup_cross_session?: boolean;
   /** Server v0.12.3+: let consolidation merge memories of different sessions. */
@@ -2388,6 +2568,8 @@ export interface AutoPilotDedupResult {
   duplicates_found?: number;
   /** Server v0.12.3+: the mode the pass ran in (`report` or `merge`). */
   mode?: AutoPilotDedupMode | (string & {});
+  /** Server v0.12.4+: what the pass could not do; `success` is then `false`. */
+  failures?: string[];
 }
 
 /** Consolidation result from a manual trigger */
@@ -2396,6 +2578,14 @@ export interface AutoPilotConsolidationResult {
   memories_scanned: number;
   clusters_merged: number;
   memories_consolidated: number;
+  /** Server v0.12.4+: groups found (in `report` mode none is merged). */
+  clusters_found?: number;
+  /** Server v0.12.4+: memories in those groups. */
+  memories_in_clusters?: number;
+  /** Server v0.12.4+: the mode the pass ran in (`report` or `merge`). */
+  mode?: AutoPilotConsolidationMode | (string & {});
+  /** Server v0.12.4+: what the pass could not do; `success` is then `false`. */
+  failures?: string[];
 }
 
 /** PILOT-3: Trigger response */
@@ -2444,6 +2634,11 @@ export interface LastDecayCycleStats {
   memories_processed: number;
   memories_decayed: number;
   memories_deleted: number;
+  /**
+   * Server v0.12.4+: what this cycle could not do (a listing, page read,
+   * delete or rewrite), with why. Absent when it did everything.
+   */
+  failures?: string[];
 }
 
 /** Response from GET /v1/admin/decay/stats (DECAY-2) */
@@ -2456,6 +2651,8 @@ export interface DecayStatsResponse {
   last_run_at?: number;
   /** Number of decay cycles completed since startup */
   cycles_run: number;
+  /** Server v0.12.4+: of those, the cycles that could not do everything (see `last_cycle.failures`). */
+  cycles_failed?: number;
   /** Stats from the most recent decay cycle (undefined if never run) */
   last_cycle?: LastDecayCycleStats;
 }
@@ -2463,6 +2660,21 @@ export interface DecayStatsResponse {
 // =============================================================================
 // API Key Types
 // =============================================================================
+
+/**
+ * Answer of a key revocation or deactivation (`DELETE /admin/keys/{id}`,
+ * `POST /admin/keys/{id}/deactivate`).
+ *
+ * Server v0.12.4+: the change applies on every node at once and the HTTP
+ * status says whether it is stored: `200` stored; `202` logged and retried
+ * until stored (`success: true`, `message` says so); `503` not even logged
+ * (`ServerError`; retry once storage recovers); `409` a later change of the
+ * key took over first (`ConflictError`).
+ */
+export interface KeyChangeResponse {
+  success: boolean;
+  message: string;
+}
 
 /** API key */
 export interface ApiKey {
@@ -2699,6 +2911,129 @@ export interface BatchForgetResponse {
 }
 
 // ============================================================================
+// Forget (`POST /v1/memory/forget`, `POST /v1/memory/forget/detect`)
+// ============================================================================
+
+/**
+ * How the server read a message as a request to forget (server v0.12.4+):
+ * the `intent` of a forget by `request`, the `forget_request` of a store, one
+ * entry of {@link ForgetDetectResponse.results}.
+ */
+export interface ForgetIntent {
+  /** Probability that the message asks to forget something said. */
+  probability: number;
+  /** The bar a message must reach to be a request (absent in detect results: see the response). */
+  threshold?: number;
+  /** The message reads as a request to forget (only then is anything forgotten). */
+  is_request: boolean;
+  /**
+   * The sentence that read as the request, when it is one sentence of a long
+   * message rather than the whole message.
+   */
+  sentence?: string;
+}
+
+/**
+ * Body of {@link DakeraClient.forgetMemories} (`POST /v1/memory/forget`,
+ * minus `agent_id`). Fields left `undefined` are not sent.
+ *
+ * Choose the memories by id or filter (`memory_ids`, `memory_type`,
+ * `session_id`, `tags`, `below_importance`), or (server v0.12.4+) by meaning:
+ * `about` (a description of what to forget) or `request` (a user's request to
+ * forget, as said, in any language). `about` and `request` cannot be combined.
+ */
+export interface ForgetRequest {
+  /** Forget these memories (with `about` / `request`: only those of them that match). */
+  memory_ids?: MemoryId[];
+  /** Only memories of this type. */
+  memory_type?: MemoryType;
+  /** Only memories of this session. */
+  session_id?: string;
+  /** Only memories carrying these tags. */
+  tags?: string[];
+  /** Only memories below this importance. */
+  below_importance?: number;
+  /**
+   * Server v0.12.4+: forget by description (at most 8,000 characters): the
+   * memories this text is about, as the cross-encoder judges them (relevance
+   * at least `min_score`), most relevant first, at most `limit`. Describe what
+   * was said ("I love sushi"), not the request to forget it. The server
+   * answers 503 when its reranker is unavailable. Not with `request`.
+   */
+  about?: string;
+  /**
+   * Server v0.12.4+: a user's request to forget, as said, in any language (at
+   * most 8,000 characters). The server reads it first (`intent` in the
+   * response); a message that is not a request forgets nothing. 503 when the
+   * detector or the reranker is unavailable. Not with `about`.
+   */
+  request?: string;
+  /**
+   * Server v0.12.4+, with `about` / `request`: only memories stored at or
+   * before this instant (Unix seconds, compared with `created_at`), so what
+   * was said after the request to forget is kept.
+   */
+  until?: number;
+  /** Server v0.12.4+, with `about`: the least relevance (0–1) a memory needs. Server default 0.5. */
+  min_score?: number;
+  /** Server v0.12.4+, with `about` / `request`: the most memories forgotten, 1–50. Server default 10. */
+  limit?: number;
+  /**
+   * Server v0.12.4+: keep a restorable copy of each deleted memory in the
+   * agent's trash ({@link DakeraClient.listDeduplicated}, kind `deletion`;
+   * {@link DakeraClient.restoreDeduplicated} puts it back).
+   */
+  restorable?: boolean;
+  /** Server v0.12.4+: report what would be forgotten in `forgotten_ids`, forget nothing. */
+  dry_run?: boolean;
+}
+
+/** Response from `POST /v1/memory/forget`. */
+export interface ForgetResponse {
+  /** Number of memories deleted (0 on a dry run). */
+  deleted_count: number;
+  /**
+   * Server v0.12.4+, with `about` (most relevant first), `request` or
+   * `dry_run`: the ids forgotten, or that would be. Absent otherwise.
+   */
+  forgotten_ids?: MemoryId[];
+  /** Server v0.12.4+, with `request`: how the message was read. */
+  intent?: ForgetIntent;
+}
+
+/** Response from `POST /v1/memory/forget/detect` (server v0.12.4+). */
+export interface ForgetDetectResponse {
+  /** The detector's encoder model. */
+  model: string;
+  /** A message at or above this probability is a request to forget. */
+  threshold: number;
+  /** A sentence of a long message at or above this probability makes it one. */
+  sentence_threshold: number;
+  /** One per text, in order. */
+  results: ForgetIntent[];
+}
+
+/**
+ * A stored memory whose content reads as a request to forget something said
+ * (server v0.12.4+, {@link BatchStoreMemoryResponse.forget_requests}).
+ */
+export interface StoredForgetRequest extends ForgetIntent {
+  /** The stored memory's id. */
+  id: MemoryId;
+}
+
+/**
+ * An item of a batch store that was not stored because the namespace's memory
+ * policy deduplicates on store (server v0.12.4+).
+ */
+export interface BatchDuplicate {
+  /** Index of the item in the request's `memories`. */
+  index: number;
+  /** The stored memory (or earlier item of the batch) it duplicates. */
+  existing_id: MemoryId;
+}
+
+// ============================================================================
 // Batch Store Memory Types (DAK-5508)
 // ============================================================================
 
@@ -2786,6 +3121,17 @@ export interface BatchStoreMemoryResponse {
    * `memories[]` item). Absent when it ignored nothing.
    */
   warnings?: string[];
+  /**
+   * Server v0.12.4+: stored memories whose content reads as a request to
+   * forget something said. Absent when none.
+   */
+  forget_requests?: StoredForgetRequest[];
+  /**
+   * Server v0.12.4+: items not stored because the namespace's memory policy
+   * deduplicates on store (`dedup_on_store`). `stored` then holds fewer items
+   * than the request. Absent when none.
+   */
+  duplicates?: BatchDuplicate[];
 }
 
 // ============================================================================
@@ -2827,6 +3173,11 @@ export interface GraphEdge {
   weight: number;
   /** Unix timestamp (seconds) of edge creation; 0 when the server did not say. */
   created_at: number;
+  /**
+   * The label a client gave the link (`linked_by` edges), when it has one.
+   * Stored and returned since server v0.12.4 (earlier servers dropped it).
+   */
+  label?: string;
 }
 
 /** A node (memory) in the knowledge graph traversal result. */
@@ -2883,6 +3234,8 @@ export interface GraphLinkResponse {
   to_id: string;
   /** Always `linked_by`: the server records explicit links with that type. */
   edge_type: EdgeType;
+  /** Server v0.12.4+: the link's label, when it has one. */
+  label?: string;
   /**
    * The created edge, built by the client from the answer (weight 1.0, as the
    * server stores explicit links; `created_at` 0 because the answer omits it).
@@ -2894,7 +3247,11 @@ export interface GraphLinkResponse {
 export interface MemoryLinkOptions {
   /** Agent that owns both memories (required by the server). */
   agentId: string;
-  /** Optional human-readable label. */
+  /**
+   * What the link means (at most 256 bytes, no control characters). Stored
+   * with the edge and returned in traversals and exports since server
+   * v0.12.4; linking the same pair again replaces it.
+   */
   label?: string;
 }
 
@@ -2983,6 +3340,19 @@ export interface ExtractedEntity {
 /** Response from POST /v1/memories/extract */
 export interface EntityExtractionResponse {
   entities: ExtractedEntity[];
+  /** Number of entities. */
+  count?: number;
+  /**
+   * Server v0.12.4+: which extractor produced `entities`: `gliner` (the
+   * neural pass ran, on top of the rules) or `rule_based`.
+   */
+  extractor?: 'gliner' | 'rule_based' | (string & {});
+  /**
+   * Server v0.12.4+: what the caller must know about the result, e.g. the
+   * neural pass failed (rule-based entities only) or covered part of the
+   * text. Absent when there is nothing to say.
+   */
+  warnings?: string[];
 }
 
 /** Response from GET /v1/memory/entities/:id */
@@ -3167,16 +3537,62 @@ export interface ConsolidationLogEntry {
 
 /** Response from POST /v1/import (DX-1). */
 export interface MemoryImportResponse {
+  /** Memories imported (the server's `imported`). */
   imported_count: number;
+  /** Items skipped (the server's `skipped`). */
   skipped_count: number;
+  /** The first refused items, with why (at most 20). */
   errors: string[];
+  /** The import job (poll it with {@link DakeraClient.importJobStatus}). */
+  job_id?: string;
+  /**
+   * `done`, `failed` (every item skipped, or the server was overloaded) or,
+   * for an `async` import (server v0.12.4+), `running`.
+   */
+  status?: ImportJobState;
+  /** The format the server read. */
+  format?: string;
+  /** Items in the file. */
+  total?: number;
+  /** Unix seconds. */
+  started_at?: number;
+  /** Unix seconds; absent while running. */
+  finished_at?: number;
+}
+
+/** Options of {@link DakeraClient.importMemories}. */
+export interface ImportMemoriesOptions {
+  /**
+   * Server v0.12.4+: answer at once (`202`, `status: "running"`) and import
+   * in the background, for files whose embedding would outlast a proxy's
+   * timeout. Poll with {@link DakeraClient.importJobStatus} or
+   * {@link DakeraClient.waitForImportJob}. An older server ignores it and
+   * imports within the request.
+   */
+  async?: boolean;
+}
+
+/** Options of {@link DakeraClient.waitForImportJob}. */
+export interface WaitForImportJobOptions {
+  /** Delay between polls in ms (default 1000). */
+  intervalMs?: number;
+  /** Give up after this many ms (default 600000) with a `TimeoutError`. */
+  timeoutMs?: number;
+  /** Abort the wait. */
+  signal?: AbortSignal;
 }
 
 /** Response from GET /v1/export (DX-1). */
 export interface MemoryExportResponse {
+  /** The memories of the file as objects (CSV rows as string-valued objects). */
   data: Record<string, unknown>[];
   format: string;
+  /** Number of entries in `data`. */
   count: number;
+  /** The export file as the server sent it (pass it back to {@link DakeraClient.importMemories}). */
+  raw: string;
+  /** Stored memories the server could not export (`x-dakera-export-skipped`). */
+  skipped: number;
 }
 
 // =============================================================================
@@ -3354,6 +3770,13 @@ export type DecayStrategyName =
  * {@link DakeraClient.setMemoryPolicy}.
  */
 export interface MemoryPolicy {
+  /**
+   * Read only (server v0.12.4+, `getMemoryPolicy()`): whether the namespace
+   * has a stored policy. `false`: the fields are what its memories get without
+   * one. Never sent by {@link DakeraClient.setMemoryPolicy}.
+   */
+  stored?: boolean;
+
   // Differential TTLs ---------------------------------------------------------
   /**
    * TTL in seconds for `working` memories stored without one. Unset / `null`
@@ -3470,9 +3893,16 @@ export interface KpiSnapshot {
   active_agents_count: number;
   /** Total sessions created in the rolling 7-day window. */
   session_count_week: number;
-  /** Current number of nodes in the cross-agent knowledge graph. */
+  /**
+   * Agent namespaces the cross-agent knowledge network spans (server v0.12.4+;
+   * earlier servers counted the agents that had started a session).
+   */
   cross_agent_network_node_count: number;
-  /** Percentage of memories created 7 days ago that are still active. */
+  /**
+   * Of the memories at least 7 days old, the share still above the decay
+   * floor, as of the last complete decay pass (100 while none is that old).
+   * Server v0.12.4+; earlier servers fell toward 0 with nothing lost.
+   */
   memory_retention_7d_pct: number;
 }
 
@@ -3613,6 +4043,13 @@ export interface NamespaceEntityConfig {
   namespace: string;
   extract_entities: boolean;
   entity_types: string[];
+  /**
+   * Server v0.12.4+: where the two come from: `namespace` (set through this
+   * route) or `server_default` (the namespace never set them and runs the
+   * server's default entity types). The first `PUT` / `PATCH` makes the
+   * namespace's own setting hold. Absent on older servers.
+   */
+  source?: 'namespace' | 'server_default' | (string & {});
 }
 
 /** Response from GET /v1/namespaces/{ns}/extractor. */
@@ -3810,9 +4247,18 @@ export interface CreateBackupResponse {
 
 /** Request for POST /admin/backups/restore. */
 export interface RestoreBackupRequest {
-  backup_id: string;
+  /**
+   * The backup to restore. Optional with `point_in_time` (server v0.12.4+);
+   * given, it must have been taken at or before that instant.
+   */
+  backup_id?: string;
   target_namespaces?: string[];
   overwrite?: boolean;
+  /**
+   * Unix seconds (acted on since server v0.12.4): restore the newest backup
+   * completed at or before this instant that holds the target namespaces.
+   * With `overwrite: true` the namespaces are exactly what they were then.
+   */
   point_in_time?: number;
 }
 
@@ -3959,10 +4405,16 @@ export interface TtlStatsResponse {
 
 /** Response from POST /v1/admin/ttl/cleanup */
 export interface TtlCleanupResponse {
+  /** Server v0.12.4+: `false` when a namespace could not be swept (see `failed`). */
   success: boolean;
   vectors_removed: number;
   namespaces_cleaned: string[];
   message: string;
+  /**
+   * Server v0.12.4+: namespaces whose sweep failed, with why. Absent when
+   * every namespace was swept.
+   */
+  failed?: UnavailableNamespace[];
 }
 
 /** A single route match from the query router. */
@@ -3988,9 +4440,12 @@ export interface RouteRequest {
 }
 
 /** Response from GET /v1/import/{job_id}/status */
+/** State of an import job. */
+export type ImportJobState = 'running' | 'done' | 'failed' | (string & {});
+
 export interface ImportJobStatus {
   job_id: string;
-  status: string;
+  status: ImportJobState;
   format: string;
   total: number;
   imported: number;
@@ -4398,8 +4853,11 @@ export interface AdminConfigUpdateResponse extends AdminConfig {
 // Deduplicated memories (server v0.12.3+, Dakera-AI/dakera#930)
 // =============================================================================
 
-/** Which pass deleted a {@link DeduplicatedMemory}. */
-export type DeduplicatedKind = 'deduplication' | 'consolidation';
+/**
+ * What deleted a {@link DeduplicatedMemory}: deduplication, consolidation or
+ * (server v0.12.4+) a forget with `restorable: true` (`deletion`).
+ */
+export type DeduplicatedKind = 'deduplication' | 'consolidation' | 'deletion';
 
 /**
  * A memory deduplication or consolidation deleted that can still be restored
@@ -4410,7 +4868,10 @@ export interface DeduplicatedMemory {
   id: MemoryId;
   /** Which pass deleted it. */
   kind: DeduplicatedKind | (string & {});
-  /** The memory it was folded (deduplication) or merged (consolidation) into. */
+  /**
+   * The memory it was folded (deduplication) or merged (consolidation) into;
+   * for a `deletion`, not a memory that exists.
+   */
   survivor_id: MemoryId;
   /** Its session, if it had one. */
   session_id?: string;
@@ -4418,6 +4879,11 @@ export interface DeduplicatedMemory {
   deleted_at: number;
   /** Until when it can be restored (Unix seconds); purged after. */
   restorable_until: number;
+  /**
+   * Server v0.12.4+: its text, so a list of restorable memories can show what
+   * each one was. Absent when it cannot be read back (and on older servers).
+   */
+  content?: string;
 }
 
 /** Answer of `GET /v1/memory/deduplicated?agent_id=`. */
@@ -4512,6 +4978,30 @@ export interface DerivationStatus extends DerivationOwed {
   heal: DerivationHealState | null;
   reconciler: DerivationReconcilerStatus;
   counters: DerivationCounters;
+  /**
+   * Server v0.12.4+: the background entity tagging of stored memories on this
+   * node (`settled` waits for it too). Absent on older servers.
+   */
+  entity_tagging?: EntityTaggingStatus;
+}
+
+/** Background entity tagging on a node ({@link DerivationStatus.entity_tagging}, server v0.12.4+). */
+export interface EntityTaggingStatus {
+  /** `background` (the default) or `inline`. */
+  mode: 'background' | 'inline' | (string & {});
+  /** Memories queued or being tagged. */
+  pending: number;
+  /** Namespaces marked for a sweep. */
+  sweep_namespaces: string[];
+  /** Counters since start. */
+  tagged: number;
+  already_tagged: number;
+  superseded: number;
+  retried: number;
+  dropped_to_sweep: number;
+  failed: number;
+  /** Memories left untagged because the store's LLM extractor failed 3 times on their text. */
+  extractor_gave_up: number;
 }
 
 /** Body of `POST /admin/derivations/drain` (server v0.12.2+). */

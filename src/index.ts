@@ -43,6 +43,7 @@ export {
   NEIGHBORHOOD_MODES,
   isNeighborhoodMode,
   AUTOPILOT_DEDUP_MODES,
+  AUTOPILOT_CONSOLIDATION_MODES,
   AUDIT_EVENT_DEDUPLICATED,
   AUDIT_EVENT_CONSOLIDATED,
   AUDIT_EVENT_RESTORED,
@@ -487,6 +488,25 @@ export type {
   DerivationStatus,
   DrainDerivationsRequest,
   DrainDerivationsResponse,
+  // Server v0.12.4
+  ForgetIntent,
+  ForgetRequest,
+  ForgetResponse,
+  ForgetDetectResponse,
+  StoredForgetRequest,
+  BatchDuplicate,
+  StrengthPoint,
+  GetMemoryOptions,
+  MemoryWithProjection,
+  ImportJobState,
+  ImportMemoriesOptions,
+  WaitForImportJobOptions,
+  KeyChangeResponse,
+  HealthComponent,
+  EntityTaggingStatus,
+  AutoPilotConsolidationMode,
+  DuplicateGroupFailure,
+  AgentUnavailable,
 } from './types';
 
 // Errors

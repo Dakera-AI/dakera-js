@@ -59,6 +59,29 @@ function flattenRecalledList(raw: unknown): RecalledMemory[] | undefined {
 }
 
 /**
+ * `POST /v1/import`'s job status as {@link MemoryImportResponse}: the server's
+ * `imported` / `skipped` as `imported_count` / `skipped_count`, the job fields
+ * as sent.
+ */
+function importResponse(raw: Record<string, unknown> | undefined): MemoryImportResponse {
+  const r = raw ?? {};
+  const num = (v: unknown, fallback: unknown): number =>
+    typeof v === 'number' ? v : typeof fallback === 'number' ? fallback : 0;
+  const out: MemoryImportResponse = {
+    imported_count: num(r['imported'], r['imported_count']),
+    skipped_count: num(r['skipped'], r['skipped_count']),
+    errors: Array.isArray(r['errors']) ? (r['errors'] as string[]) : [],
+  };
+  if (typeof r['job_id'] === 'string') out.job_id = r['job_id'];
+  if (typeof r['status'] === 'string') out.status = r['status'];
+  if (typeof r['format'] === 'string') out.format = r['format'];
+  if (typeof r['total'] === 'number') out.total = r['total'];
+  if (typeof r['started_at'] === 'number') out.started_at = r['started_at'];
+  if (typeof r['finished_at'] === 'number') out.finished_at = r['finished_at'];
+  return out;
+}
+
+/**
  * The wire form of an `event_time` (server v0.12.3+): Unix seconds as given,
  * an RFC 3339 string as given, a `Date` as its ISO 8601 string. Only values
  * that are not a time at all are refused here; the bounds are the server's.
@@ -162,8 +185,150 @@ const RECALL_OPTION_KEYS = [
   'include_associated', 'associated_memories_cap', 'associated_memories_depth',
   'associated_memories_min_weight', 'since', 'until', 'routing', 'rerank', 'rerank_candidates',
   'fusion', 'vector_weight', 'iterations', 'neighborhood', 'neighborhood_mode',
-  'include_summaries', 'lang',
+  'include_summaries', 'lang', 'rerank_head',
 ] as const satisfies readonly (keyof MemoryRecallOptions)[];
+
+/** Fields of {@link ForgetRequest}, in the order they are sent. */
+const FORGET_FIELDS = [
+  'memory_ids', 'memory_type', 'session_id', 'tags', 'below_importance', 'about', 'request',
+  'until', 'min_score', 'limit', 'restorable', 'dry_run',
+] as const satisfies readonly (keyof ForgetRequest)[];
+/** Forget fields a server before v0.12.4 ignores. */
+const FORGET_V0124_FIELDS = [
+  'about', 'request', 'until', 'min_score', 'limit', 'restorable', 'dry_run',
+] as const satisfies readonly (keyof ForgetRequest)[];
+/** Forget fields every server selects memories by. */
+const FORGET_FILTER_FIELDS = [
+  'memory_ids', 'memory_type', 'session_id', 'tags', 'below_importance',
+] as const satisfies readonly (keyof ForgetRequest)[];
+
+/** `[major, minor, patch]` of a server version string such as `0.12.4`; `undefined` when unreadable. */
+function parseServerVersion(version: string | undefined): [number, number, number] | undefined {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec((version ?? '').trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
+}
+
+/** Whether `version` is at least `min`. */
+function versionAtLeast(version: [number, number, number], min: readonly [number, number, number]): boolean {
+  for (let i = 0; i < 3; i++) {
+    if (version[i] !== min[i]) return version[i] > min[i];
+  }
+  return true;
+}
+
+/** Multipart body of `POST /v1/import` (the server reads the first file field). */
+function importUpload(data: unknown, format: string): { body: Uint8Array; contentType: string } {
+  let payload: string | Uint8Array;
+  if (data instanceof Uint8Array) {
+    payload = data;
+  } else if (typeof data === 'string') {
+    payload = data;
+  } else if (format === 'csv') {
+    throw new ValidationError(
+      "importMemories(format: 'csv') needs the CSV text (a string or bytes)",
+      undefined,
+      undefined,
+      ErrorCode.INVALID_REQUEST,
+    );
+  } else if (format === 'jsonl') {
+    const items = Array.isArray(data) ? data : [data];
+    payload = items.map((item) => JSON.stringify(item)).join('\n');
+  } else if (Array.isArray(data)) {
+    payload = JSON.stringify({ [format === 'zep' ? 'messages' : 'memories']: data });
+  } else {
+    payload = JSON.stringify(data);
+  }
+  const ext = format === 'csv' || format === 'jsonl' ? format : 'json';
+  const type = format === 'csv' ? 'text/csv' : format === 'jsonl' ? 'application/x-ndjson' : 'application/json';
+  const boundary = `dakera-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="import.${ext}"\r\n` +
+      `Content-Type: ${type}\r\n\r\n`,
+  );
+  const bytes = typeof payload === 'string' ? encoder.encode(payload) : payload;
+  const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+  const body = new Uint8Array(head.length + bytes.length + tail.length);
+  body.set(head, 0);
+  body.set(bytes, head.length);
+  body.set(tail, head.length + bytes.length);
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+/** Split one CSV line (RFC 4180 quoting). */
+function csvFields(line: string): string[] {
+  const out: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      quoted = true;
+    } else if (c === ',') {
+      out.push(field);
+      field = '';
+    } else {
+      field += c;
+    }
+  }
+  out.push(field);
+  return out;
+}
+
+/** Split CSV text into records, keeping newlines inside quoted fields. */
+function csvRecords(text: string): string[] {
+  const records: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') quoted = !quoted;
+    if (!quoted && (c === '\n' || c === '\r')) {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      records.push(current);
+      current = '';
+      continue;
+    }
+    current += c;
+  }
+  if (current !== '') records.push(current);
+  return records.filter((r) => r !== '');
+}
+
+/** The memories of an export file (`GET /v1/export`) as objects. */
+function exportItems(text: string, format: string): Record<string, unknown>[] {
+  if (format === 'csv') {
+    const [header, ...rows] = csvRecords(text);
+    if (header === undefined) return [];
+    const names = csvFields(header);
+    return rows.map((row) => {
+      const values = csvFields(row);
+      const item: Record<string, unknown> = {};
+      names.forEach((name, i) => {
+        if (name !== '__proto__') item[name] = values[i] ?? '';
+      });
+      return item;
+    });
+  }
+  if (format === 'mem0' || format === 'zep') {
+    const doc = text.trim() ? (safeJsonParse(text) as Record<string, unknown>) : {};
+    const items = doc?.[format === 'zep' ? 'messages' : 'memories'];
+    return Array.isArray(items) ? (items as Record<string, unknown>[]) : [];
+  }
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '')
+    .map((line) => safeJsonParse(line) as Record<string, unknown>);
+}
 
 /** Fields of {@link SearchMemoriesOptions}. */
 const SEARCH_OPTION_KEYS = [
@@ -180,6 +345,7 @@ const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS']);
  */
 const READ_ONLY_POST_ROUTES: readonly RegExp[] = [
   /^\/v1\/memory\/(recall|search)$/,
+  /^\/v1\/memory\/forget\/detect$/,
   /^\/v1\/memories\/recall\/batch$/,
   /^\/v1\/namespaces\/[^/]+\/(query|batch-query|multi-vector|unified-query|aggregate|explain|query-text|batch-query-text|hybrid|export)$/,
   /^\/v1\/namespaces\/[^/]+\/fulltext\/search$/,
@@ -510,8 +676,23 @@ import type {
   TranscribeRequest,
   WaitForJobOptions,
   WaitUntilReadyOptions,
+  // Server v0.12.4
+  ForgetRequest,
+  ForgetResponse,
+  ForgetDetectResponse,
+  GetMemoryOptions,
+  MemoryWithProjection,
+  ImportMemoriesOptions,
+  WaitForImportJobOptions,
+  KeyChangeResponse,
 } from './types';
-import { AUTOPILOT_DEDUP_MODES, computeTifScore, isNeighborhoodMode, NEIGHBORHOOD_MODES } from './types';
+import {
+  AUTOPILOT_CONSOLIDATION_MODES,
+  AUTOPILOT_DEDUP_MODES,
+  computeTifScore,
+  isNeighborhoodMode,
+  NEIGHBORHOOD_MODES,
+} from './types';
 
 /**
  * A graph edge as the server sends it (`from_id`, `to_id`, ...), with the
@@ -545,7 +726,7 @@ const DEFAULT_BASE_DELAY = 100;
 const DEFAULT_MAX_DELAY = 60000;
 
 /** SDK version, kept in sync with package.json. Used for the default User-Agent. */
-const SDK_VERSION = '0.12.3';
+const SDK_VERSION = '0.12.4';
 
 /**
  * Dakera client for interacting with the AI memory platform.
@@ -742,6 +923,8 @@ export class DakeraClient {
       accept?: string;
       /** Caller's signal: aborting it aborts the attempt and stops retrying (its reason is thrown). */
       signal?: AbortSignal;
+      /** Called with each successful response before its body is read (to read headers). */
+      onResponse?: (response: Response) => void;
     }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
@@ -769,6 +952,7 @@ export class DakeraClient {
           body: opts?.rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
           signal: controller.signal,
         });
+        if (response.ok) opts?.onResponse?.(response);
         // The body is read under the same deadline.
         return await this.handleResponse<T>(response, opts?.asBytes);
       } catch (error) {
@@ -1459,6 +1643,12 @@ export class DakeraClient {
   /**
    * Warm cache for vectors in a namespace.
    *
+   * Server v0.12.4+ acts on every field: the records go into exactly
+   * `targetTier`, `accessPattern` chooses and orders them, `priority` paces
+   * the reads, and `background: true` runs a job whose `job_id` is tracked by
+   * `GET /ops/jobs/{id}` (`ttlHintSeconds` keeps the set warm, capped at 7
+   * days). A warm fills at most 100,000 records.
+   *
    * @param namespace - Target namespace
    * @param options - Cache warming options
    * @returns Cache warming response
@@ -1483,6 +1673,12 @@ export class DakeraClient {
       ttlHintSeconds?: number;
       accessPattern?: AccessPatternHint;
       maxVectors?: number;
+      /** Server v0.12.4+: warm the records nearest this vector. */
+      queryVector?: number[];
+      /** Server v0.12.4+, with `queryVector`: only records at or above this similarity. */
+      minScoreThreshold?: number;
+      /** Only records accessed within this many seconds (acted on since server v0.12.4). */
+      recentlyAccessedWithin?: number;
     } = {}
   ): Promise<WarmCacheResponse> {
     const body: Record<string, unknown> = {
@@ -1501,6 +1697,15 @@ export class DakeraClient {
     }
     if (options.maxVectors !== undefined) {
       body.max_vectors = options.maxVectors;
+    }
+    if (options.queryVector !== undefined) {
+      body.query_vector = options.queryVector;
+    }
+    if (options.minScoreThreshold !== undefined) {
+      body.min_score_threshold = options.minScoreThreshold;
+    }
+    if (options.recentlyAccessedWithin !== undefined) {
+      body.recently_accessed_within = options.recentlyAccessedWithin;
     }
 
     return this.request<WarmCacheResponse>(
@@ -2009,6 +2214,10 @@ export class DakeraClient {
    * than the embedding model reads, and `warnings` when the server ignored a
    * request field. All of them are absent on older servers.
    *
+   * Server v0.12.4+: `forget_request` is present when the content reads as a
+   * request to forget something said (act on it with {@link forgetMemories}
+   * and `request`).
+   *
    * @example
    * ```ts
    * const res = await client.storeMemory('agent-1', {
@@ -2038,6 +2247,13 @@ export class DakeraClient {
    * `memories` and the context in `context_memories` (each with `context_of`),
    * or `"off"` for none. Older servers ignore `neighborhood_mode` and
    * `include_summaries`, and send none of the new response fields.
+   *
+   * Server v0.12.4+: `associated_memories` are returned by default (send
+   * `include_associated: false` to turn them off), `importance_weighted`
+   * defaults to `false`, `instructions` holds the agent's standing
+   * instructions that fit the query, `rerank_head` sets the reranked head and
+   * `degraded` names any part of the recall that could not be served. The SDK
+   * sends none of these options unless set, so the server's defaults apply.
    *
    * @param agentId - Agent identifier
    * @param query - Semantic query text
@@ -2073,7 +2289,7 @@ export class DakeraClient {
     }
     body['agent_id'] = agentId;
     const raw = await this.request<Record<string, unknown>>('POST', '/v1/memory/recall', body);
-    const { memories, associated_memories, context_memories, ...rest } = raw ?? {};
+    const { memories, associated_memories, context_memories, instructions, ...rest } = raw ?? {};
     const response: RecallResponse = {
       ...(rest as Omit<RecallResponse, 'memories'>),
       memories: flattenRecalledList(memories) ?? [],
@@ -2082,6 +2298,8 @@ export class DakeraClient {
     if (associated !== undefined) response.associated_memories = associated;
     const context = flattenRecalledList(context_memories);
     if (context !== undefined) response.context_memories = context;
+    const standing = flattenRecalledList(instructions);
+    if (standing !== undefined) response.instructions = standing;
     return response;
   }
 
@@ -2094,17 +2312,43 @@ export class DakeraClient {
    * key may read: one holder returns it, none is a 404 (`NotFoundError`),
    * several agents holding the id is a 400 (`ValidationError`) asking for
    * `agent_id`. An older server needs the agent id.
+   *
+   * Server v0.12.4+: `getMemory(agentId, memoryId, { projection_days: N })`
+   * (N 1–365) also returns `strength_projection`, the memory's importance for
+   * each of the next N days under its namespace's decay policy.
    */
-  async getMemory(memoryId: string): Promise<Memory>;
-  async getMemory(agentId: string | undefined, memoryId: string): Promise<Memory>;
-  async getMemory(agentIdOrMemoryId: string | undefined, memoryId?: string): Promise<Memory> {
+  async getMemory(memoryId: string): Promise<MemoryWithProjection>;
+  async getMemory(
+    agentId: string | undefined,
+    memoryId: string,
+    options?: GetMemoryOptions,
+  ): Promise<MemoryWithProjection>;
+  async getMemory(
+    agentIdOrMemoryId: string | undefined,
+    memoryId?: string,
+    options?: GetMemoryOptions,
+  ): Promise<MemoryWithProjection> {
     const [agentId, id] =
       memoryId === undefined ? [undefined, agentIdOrMemoryId] : [agentIdOrMemoryId, memoryId];
     if (typeof id !== 'string' || id === '') {
       throw new ValidationError('getMemory needs a memory id', undefined, undefined, ErrorCode.INVALID_REQUEST);
     }
-    const query = agentId === undefined || agentId === null ? '' : `?agent_id=${encodeURIComponent(agentId)}`;
-    return this.request<Memory>('GET', `/v1/memory/get/${encodeURIComponent(id)}${query}`);
+    const query: string[] = [];
+    if (agentId !== undefined && agentId !== null) query.push(`agent_id=${encodeURIComponent(agentId)}`);
+    const days = options?.projection_days;
+    if (days !== undefined) {
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        throw new ValidationError(
+          `projection_days must be an integer between 1 and 365 (got ${String(days)})`,
+          undefined,
+          undefined,
+          ErrorCode.INVALID_REQUEST,
+        );
+      }
+      query.push(`projection_days=${days}`);
+    }
+    const qs = query.join('&');
+    return this.request<MemoryWithProjection>('GET', `/v1/memory/get/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`);
   }
 
   /**
@@ -2122,9 +2366,112 @@ export class DakeraClient {
     );
   }
 
-  /** Delete a memory */
-  async forget(agentId: string, memoryId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/v1/memory/forget', { agent_id: agentId, memory_ids: [memoryId] });
+  /**
+   * Delete one memory (`POST /v1/memory/forget` with its id). The server
+   * answers `{ deleted_count }` (earlier SDKs typed it `{ status }`, which the
+   * server never sent). See {@link forgetMemories} for filters, forgetting by
+   * description and restorable deletes.
+   */
+  async forget(agentId: string, memoryId: string): Promise<ForgetResponse> {
+    return this.request<ForgetResponse>('POST', '/v1/memory/forget', { agent_id: agentId, memory_ids: [memoryId] });
+  }
+
+  /**
+   * Forget memories of an agent (`POST /v1/memory/forget`, write scope).
+   *
+   * By id or filter (`memory_ids`, `memory_type`, `session_id`, `tags`,
+   * `below_importance`; the server requires at least one selector), or, server
+   * v0.12.4+, by meaning:
+   * - `about`: a description of what to forget ("I love sushi"). The server
+   *   scores candidates against it with its cross-encoder and forgets those at
+   *   least `min_score` relevant (default 0.5), at most `limit` (default 10,
+   *   at most 50), most relevant first, in `forgotten_ids`.
+   * - `request`: a user's request to forget as said, in any language ("Please
+   *   forget that I told you I love sushi"). The server checks that it is one
+   *   (`intent`) and forgets what it means; a message that is not a request
+   *   forgets nothing.
+   *
+   * `until` keeps memories stored after that instant out of reach,
+   * `restorable: true` keeps a copy in the agent's trash
+   * ({@link listDeduplicated} / {@link restoreDeduplicated}), and
+   * `dry_run: true` answers `forgotten_ids` and forgets nothing.
+   *
+   * Safety: a server before v0.12.4 ignores those fields and would forget
+   * every memory the other selectors match (a `dry_run` would delete). When a
+   * v0.12.4 field is combined with `memory_ids` or a filter, the SDK first
+   * checks the server version ({@link capabilities}, cached) and throws a
+   * `ValidationError` without sending anything on an older server.
+   *
+   * @throws {@link ValidationError} for `about` together with `request`, or a
+   *   v0.12.4 field combined with a filter on an older server.
+   * @throws {@link ServerError} (503, after the client's retries) when the
+   *   server's reranker or forget detector is unavailable.
+   */
+  async forgetMemories(agentId: string, request: ForgetRequest): Promise<ForgetResponse> {
+    if (request.about !== undefined && request.request !== undefined) {
+      throw new ValidationError(
+        'forgetMemories: `about` and `request` cannot be combined (send one)',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    const body: Record<string, unknown> = { agent_id: agentId };
+    for (const key of FORGET_FIELDS) {
+      if (request[key] !== undefined) body[key] = request[key];
+    }
+    const newFields = FORGET_V0124_FIELDS.filter((k) => request[k] !== undefined);
+    if (newFields.length > 0 && FORGET_FILTER_FIELDS.some((k) => request[k] !== undefined)) {
+      await this.requireServer([0, 12, 4], `forgetMemories(${newFields.join(', ')}) with a filter`,
+        'an older server ignores these fields and would forget every memory the filters select');
+    }
+    return this.request<ForgetResponse>('POST', '/v1/memory/forget', body);
+  }
+
+  /**
+   * Whether each message asks to forget something said, in any language
+   * (`POST /v1/memory/forget/detect`, server v0.12.4+, read scope). Reads no
+   * memory: check a user's messages here, then forget the ones that are
+   * requests with {@link forgetMemories} and `request`. 1–64 texts of at most
+   * 8,000 characters each (the server answers 400 otherwise). `503` when the
+   * detector cannot be loaded; a pre-0.12.4 server answers 404.
+   */
+  async detectForgetRequests(texts: string[]): Promise<ForgetDetectResponse> {
+    if (!Array.isArray(texts) || texts.length === 0) {
+      throw new ValidationError(
+        'detectForgetRequests needs at least one text',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    return this.request<ForgetDetectResponse>('POST', '/v1/memory/forget/detect', { texts });
+  }
+
+  /**
+   * Throw a `ValidationError` unless the server is at least `min`
+   * ({@link capabilities}, cached). A server without the capabilities route
+   * is older than v0.12.
+   */
+  private async requireServer(
+    min: readonly [number, number, number],
+    what: string,
+    why: string,
+  ): Promise<void> {
+    let version: string | undefined;
+    try {
+      version = (await this.capabilities()).server_version || undefined;
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+    }
+    const parsed = parseServerVersion(version);
+    if (parsed !== undefined && versionAtLeast(parsed, min)) return;
+    throw new ValidationError(
+      `${what} needs Dakera server v${min.join('.')}+ (this server: ${version ? `v${version}` : 'unknown, before v0.12'}); ${why}`,
+      undefined,
+      undefined,
+      ErrorCode.INVALID_REQUEST,
+    );
   }
 
   /**
@@ -2196,9 +2543,11 @@ export class DakeraClient {
    * List an agent's memories that deduplication or consolidation deleted and
    * that can still be restored (`GET /v1/memory/deduplicated?agent_id=`,
    * server v0.12.3+, read scope). Newest first; each names its `kind`
-   * (`deduplication` | `consolidation`), the `survivor_id` it was folded or
-   * merged into, and `restorable_until` (the server's
-   * `DAKERA_AUTOPILOT_TRASH_RETENTION_HOURS`, default 168 h).
+   * (`deduplication` | `consolidation`, or `deletion` for a
+   * {@link forgetMemories} with `restorable: true`, server v0.12.4+), the
+   * `survivor_id` it was folded or merged into, and `restorable_until` (the
+   * server's `DAKERA_AUTOPILOT_TRASH_RETENTION_HOURS`, default 168 h). Server
+   * v0.12.4+ adds each memory's `content`.
    */
   async listDeduplicated(agentId: string): Promise<DeduplicatedListResponse> {
     return this.request<DeduplicatedListResponse>(
@@ -2208,7 +2557,7 @@ export class DakeraClient {
   }
 
   /**
-   * Put back a memory deduplication or consolidation deleted, exactly as it
+   * Put back a memory deduplication, consolidation or a restorable forget deleted, exactly as it
    * was stored, under its own id (`POST /v1/memory/deduplicated/{id}/restore`,
    * server v0.12.3+, write scope). Returns the restored memory.
    *
@@ -2933,7 +3282,13 @@ export class DakeraClient {
   // Entity Extraction Operations (CE-4)
   // =========================================================================
 
-  /** Get entity extraction configuration for a namespace. */
+  /**
+   * Get entity extraction configuration for a namespace
+   * (`GET /v1/namespaces/{ns}/config`). Server v0.12.4+ answers what is in
+   * effect, with `source`: `namespace` (set through this route) or
+   * `server_default` (the namespace never set it and runs the server's default
+   * entity types).
+   */
   async getNamespaceEntityConfig(namespace: string): Promise<NamespaceEntityConfig> {
     return this.request<NamespaceEntityConfig>('GET', `/v1/namespaces/${encodeURIComponent(namespace)}/config`);
   }
@@ -2988,7 +3343,12 @@ export class DakeraClient {
    * @param text - Text to extract entities from
    * @param entityTypes - Entity types to extract (defaults to server defaults)
    * @param options.lang - v0.12: language of `text` for the rule-based date rules (400 if unsupported)
-   * @returns EntityExtractionResponse with extracted entities
+   * @returns EntityExtractionResponse with extracted entities; server v0.12.4+
+   *   adds `extractor` (`gliner` or `rule_based`) and `warnings` (a neural pass
+   *   that failed or covered part of the text). Server v0.12.4 checks the
+   *   labels (at most 200, each at most 64 characters, no `:`, `<<`, `>>`;
+   *   400 otherwise) and expands the `@conversational`, `@technical`,
+   *   `@personal` and `@pii` presets.
    *
    * @note Requires CE-4 (GLiNER) on the server.
    */
@@ -3065,6 +3425,13 @@ export class DakeraClient {
    * with its persisted state — `ended_reason` and `summary` are not
    * overwritten. An unknown session, or one of an agent the key cannot reach,
    * gets the same idempotent 200 with an empty session (`agent_id: ""`).
+   *
+   * Server v0.12.4+: `auto_summarize` is honoured (omitted: a summary memory
+   * for a session with more than 3 memories; `true`: for any session with
+   * memories; `false`: none). When the summary memory cannot be stored yet the
+   * session is ended anyway and `summary_pending` says why (the server stores
+   * it later). A session whose memories cannot be read is not ended: the
+   * server answers an error and the call can be repeated.
    *
    * @param sessionId - Session to end.
    * @param options - Optional `summary` / `auto_summarize` (not sent when undefined).
@@ -3227,6 +3594,9 @@ export class DakeraClient {
    *
    * @param agentId - Agent whose namespace to compress.
    * @returns {@link CompressResponse} with before/after counts and timing.
+   *   Server v0.12.4+: `deprecated_ids` lists only the deprecations written,
+   *   `deprecation_skipped` those left because the memory changed, and
+   *   `deprecation_error` a failed deprecation write.
    */
   async compressAgent(agentId: string): Promise<CompressResponse> {
     return this.request<CompressResponse>('POST', `/v1/agents/${encodeURIComponent(agentId)}/compress`);
@@ -3251,7 +3621,10 @@ export class DakeraClient {
     return this.request<SummarizeResponse>('POST', '/v1/knowledge/summarize', request);
   }
 
-  /** Deduplicate memories */
+  /**
+   * Deduplicate memories (`POST /v1/knowledge/deduplicate`). Server v0.12.4+
+   * lists the groups whose merge failed in `groups_failed`.
+   */
   async deduplicate(request: DeduplicateRequest): Promise<DeduplicateResponse> {
     return this.request<DeduplicateResponse>('POST', '/v1/knowledge/deduplicate', request);
   }
@@ -3335,7 +3708,8 @@ export class DakeraClient {
    * containing every agent's nodes and the cross-agent similarity edges that
    * connect them.
    *
-   * Requires an Admin-scoped API key.
+   * Requires an Admin-scoped API key. Server v0.12.4+ lists the agents whose
+   * memories could not be read in `unavailable` (they used to be dropped).
    *
    * @example
    * ```ts
@@ -3355,7 +3729,12 @@ export class DakeraClient {
   // Analytics Operations
   // ===========================================================================
 
-  /** Get analytics overview */
+  /**
+   * Get analytics overview (`GET /v1/analytics/overview`). Server v0.12.4+
+   * honours `period` (the latency window, `5m` when not given) and
+   * `namespace` (counts and storage of that namespace; 404 when unknown) and
+   * echoes both.
+   */
   async analyticsOverview(options?: AnalyticsOptions): Promise<AnalyticsOverview> {
     const params = new URLSearchParams();
     if (options?.period) params.set('period', options.period);
@@ -3364,7 +3743,7 @@ export class DakeraClient {
     return this.request<AnalyticsOverview>('GET', `/v1/analytics/overview${qs ? `?${qs}` : ''}`);
   }
 
-  /** Get latency analytics */
+  /** Get latency analytics (`period` and `namespace` honoured since server v0.12.4). */
   async analyticsLatency(options?: AnalyticsOptions): Promise<LatencyAnalytics> {
     const params = new URLSearchParams();
     if (options?.period) params.set('period', options.period);
@@ -3373,7 +3752,10 @@ export class DakeraClient {
     return this.request<LatencyAnalytics>('GET', `/v1/analytics/latency${qs ? `?${qs}` : ''}`);
   }
 
-  /** Get throughput analytics */
+  /**
+   * Get throughput analytics (`period` and `namespace` honoured since server
+   * v0.12.4; the rates are the period's, not lifetime averages).
+   */
   async analyticsThroughput(options?: AnalyticsOptions): Promise<ThroughputAnalytics> {
     const params = new URLSearchParams();
     if (options?.period) params.set('period', options.period);
@@ -3382,7 +3764,10 @@ export class DakeraClient {
     return this.request<ThroughputAnalytics>('GET', `/v1/analytics/throughput${qs ? `?${qs}` : ''}`);
   }
 
-  /** Get storage analytics */
+  /**
+   * Get storage analytics. Server v0.12.4+ restricts the breakdown and totals
+   * to `namespace` when given (404 when unknown).
+   */
   async analyticsStorage(namespace?: string): Promise<StorageAnalytics> {
     const params = new URLSearchParams();
     if (namespace) params.set('namespace', namespace);
@@ -3584,6 +3969,17 @@ export class DakeraClient {
         ErrorCode.INVALID_REQUEST,
       );
     }
+    if (
+      request.consolidation_mode !== undefined &&
+      !AUTOPILOT_CONSOLIDATION_MODES.includes(request.consolidation_mode)
+    ) {
+      throw new ValidationError(
+        `consolidation_mode must be one of ${AUTOPILOT_CONSOLIDATION_MODES.join(', ')} (got '${String(request.consolidation_mode)}')`,
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
     const body: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(request)) {
       if (value !== undefined) body[key] = value;
@@ -3591,7 +3987,12 @@ export class DakeraClient {
     return this.request<AutoPilotConfigResponse>('PUT', '/v1/admin/autopilot/config', body);
   }
 
-  /** Manually trigger an AutoPilot dedup or consolidation cycle (PILOT-3) */
+  /**
+   * Manually trigger an AutoPilot dedup or consolidation cycle (PILOT-3).
+   * Server v0.12.4+: consolidation runs in the configured mode (`report` while
+   * it is `off`), and a pass that could not do everything lists its
+   * `failures` with `success: false`.
+   */
   async autopilotTrigger(action: AutoPilotTriggerAction): Promise<AutoPilotTriggerResponse> {
     return this.request<AutoPilotTriggerResponse>('POST', '/v1/admin/autopilot/trigger', { action });
   }
@@ -3708,14 +4109,26 @@ export class DakeraClient {
     return this.request<ApiKey>('GET', `/admin/keys/${encodeURIComponent(keyId)}`);
   }
 
-  /** Delete an API key */
-  async deleteKey(keyId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/admin/keys/${encodeURIComponent(keyId)}`);
+  /**
+   * Revoke an API key (`DELETE /admin/keys/{id}`). The server answers
+   * `{ success, message }` ({@link KeyChangeResponse}). Server v0.12.4+: `202`
+   * (resolved, `success: true`) when the revocation applies on every node but
+   * is not stored yet (logged and retried); `409` (`ConflictError`) when a
+   * later change of the key took over; `503` (`ServerError`) when it could not
+   * even be logged.
+   */
+  async deleteKey(keyId: string): Promise<KeyChangeResponse> {
+    return this.request<KeyChangeResponse>('DELETE', `/admin/keys/${encodeURIComponent(keyId)}`);
   }
 
-  /** Deactivate an API key */
-  async deactivateKey(keyId: string): Promise<ApiKey> {
-    return this.request<ApiKey>('POST', `/admin/keys/${encodeURIComponent(keyId)}/deactivate`);
+  /**
+   * Deactivate an API key (`POST /admin/keys/{id}/deactivate`). The server
+   * answers `{ success, message }` ({@link KeyChangeResponse}; earlier SDKs
+   * typed it `ApiKey`, which the server never sent); statuses as for
+   * {@link deleteKey}.
+   */
+  async deactivateKey(keyId: string): Promise<KeyChangeResponse> {
+    return this.request<KeyChangeResponse>('POST', `/admin/keys/${encodeURIComponent(keyId)}/deactivate`);
   }
 
   /**
@@ -4153,32 +4566,91 @@ export class DakeraClient {
   // ===========================================================================
 
   /**
-   * Import memories from an external format (DX-1).
+   * Import memories into an agent (`POST /v1/import`, DX-1, write scope).
    *
-   * @param data     Serialised memories (list of objects for jsonl/mem0/zep, or a CSV string).
+   * The file is uploaded as `multipart/form-data` with `agent_id` and `format`
+   * in the query, as the server reads them (earlier SDKs sent a JSON body,
+   * which the server refused).
+   *
+   * @param data     The file: a string or bytes are sent as given (e.g. the
+   *   `raw` of {@link exportMemories}); otherwise an array of objects
+   *   (`jsonl`: one object per line; `mem0`: sent as `{"memories": [...]}`;
+   *   `zep`: `{"messages": [...]}`) or the Mem0 / Zep document as an object.
+   *   `csv` needs the CSV text.
    * @param format   One of `"jsonl"`, `"mem0"`, `"zep"`, `"csv"`. Defaults to `"jsonl"`.
-   * @param agentId  Assign all imported memories to this agent.
-   * @param namespace Target namespace (defaults to the client's configured namespace).
+   * @param agentId  The agent the memories are imported into (required by the server).
+   * @param namespace Deprecated: not read by the server and not sent (the
+   *   target is the agent's namespace).
+   * @param options  Server v0.12.4+: `async: true` answers at once with the
+   *   running job (`status: "running"`); follow it with {@link importJobStatus}
+   *   or {@link waitForImportJob}.
+   * @returns The import job's status (`imported_count`, `skipped_count`,
+   *   `errors`, `job_id`, `status`, ...).
    */
   async importMemories(
     data: unknown,
     format: 'jsonl' | 'mem0' | 'zep' | 'csv' = 'jsonl',
     agentId?: string,
     namespace?: string,
+    options?: ImportMemoriesOptions,
   ): Promise<MemoryImportResponse> {
-    const body: Record<string, unknown> = { data, format };
-    if (agentId !== undefined) body.agent_id = agentId;
-    if (namespace !== undefined) body.namespace = namespace;
-    return this.request<MemoryImportResponse>('POST', '/v1/import', body);
+    void namespace;
+    if (typeof agentId !== 'string' || agentId === '') {
+      throw new ValidationError(
+        'importMemories needs agentId: the server imports into an agent',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    const { body, contentType } = importUpload(data, format);
+    const params = new URLSearchParams({ agent_id: agentId, format });
+    if (options?.async) params.set('async', 'true');
+    const raw = await this.request<Record<string, unknown>>('POST', `/v1/import?${params}`, undefined, {
+      rawBody: body as BodyInit,
+      contentType,
+    });
+    return importResponse(raw);
   }
 
   /**
-   * Export memories in a portable format (DX-1).
+   * Poll an import job ({@link importJobStatus}) until it is `done` or
+   * `failed` (server v0.12.4+ `async` imports). Returns the final status; a
+   * `failed` job is returned too (its `errors` say why). Throws a
+   * `TimeoutError` after `timeoutMs` (default 10 minutes).
+   */
+  async waitForImportJob(jobId: string, options: WaitForImportJobOptions = {}): Promise<ImportJobStatus> {
+    const intervalMs = Math.max(0, options.intervalMs ?? 1000);
+    const timeoutMs = Math.max(0, options.timeoutMs ?? 600000);
+    const { signal } = options;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (signal?.aborted) throw abortReason(signal);
+      const current = await this.importJobStatus(jobId);
+      if (current.status !== 'running') return current;
+      if (Date.now() + intervalMs > deadline) {
+        throw new TimeoutError(
+          `Import job ${jobId} still running (${current.imported}/${current.total}) after ${timeoutMs}ms`,
+        );
+      }
+      await this.abortableSleep(intervalMs, signal);
+    }
+  }
+
+  /**
+   * Export an agent's memories (`GET /v1/export`, DX-1, read scope).
+   *
+   * The server answers the export file itself (JSON lines, CSV, or the Mem0 /
+   * Zep JSON document), without derived sentence sub-memories or expired
+   * memories (earlier SDKs expected a JSON envelope the server never sent).
    *
    * @param format    One of `"jsonl"`, `"mem0"`, `"zep"`, `"csv"`. Defaults to `"jsonl"`.
-   * @param agentId   Export only memories for this agent.
-   * @param namespace Source namespace (defaults to client namespace).
-   * @param limit     Maximum number of memories to export.
+   * @param agentId   The agent to export (required by the server).
+   * @param namespace Deprecated: not read by the server and not sent.
+   * @param limit     Keep at most this many memories in `data` (applied here;
+   *   the server exports every memory, and `raw` is the whole file).
+   * @returns `data` (the memories as objects), `raw` (the file) and
+   *   `skipped` (memories the server could not export).
    */
   async exportMemories(
     format: 'jsonl' | 'mem0' | 'zep' | 'csv' = 'jsonl',
@@ -4186,11 +4658,28 @@ export class DakeraClient {
     namespace?: string,
     limit?: number,
   ): Promise<MemoryExportResponse> {
-    const params = new URLSearchParams({ format });
-    if (agentId !== undefined) params.set('agent_id', agentId);
-    if (namespace !== undefined) params.set('namespace', namespace);
-    if (limit !== undefined) params.set('limit', String(limit));
-    return this.request<MemoryExportResponse>('GET', `/v1/export?${params}`);
+    void namespace;
+    if (typeof agentId !== 'string' || agentId === '') {
+      throw new ValidationError(
+        'exportMemories needs agentId: the server exports one agent',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
+    const params = new URLSearchParams({ agent_id: agentId, format });
+    let skipped = 0;
+    const file = await this.request<{ data: Uint8Array }>('GET', `/v1/export?${params}`, undefined, {
+      asBytes: true,
+      onResponse: (response) => {
+        const n = Number(response.headers.get('x-dakera-export-skipped'));
+        if (Number.isInteger(n) && n > 0) skipped = n;
+      },
+    });
+    const raw = new TextDecoder().decode(file.data);
+    let data = exportItems(raw, format);
+    if (limit !== undefined) data = data.slice(0, Math.max(0, limit));
+    return { data, format, count: data.length, raw, skipped };
   }
 
   // ===========================================================================
@@ -4411,6 +4900,8 @@ export class DakeraClient {
    * spaced repetition (factor 0), and consolidation, store-time dedup and
    * rate limits off.
    *
+   * Server v0.12.4+ adds `stored`: whether the namespace has a stored policy.
+   *
    * @param namespace  Namespace to inspect.
    */
   async getMemoryPolicy(namespace: string): Promise<MemoryPolicy> {
@@ -4427,17 +4918,22 @@ export class DakeraClient {
    *
    * The policy is persisted in namespace config and applied immediately to
    * the decay engine background task.  Only populate the fields you want to
-   * override — all fields have safe server-side defaults.
+   * override — all fields have safe server-side defaults. Since server
+   * v0.12.4 a TTL left out (or `null`) means no expiry by type for that type
+   * (earlier servers applied 4 h / 30 d / 365 d / 730 d), and `null` TTLs
+   * stay `null` across restarts.
    *
    * @param namespace  Namespace to configure.
    * @param policy     {@link MemoryPolicy} with the desired settings.
    * @returns          The updated policy as confirmed by the server.
    */
   async setMemoryPolicy(namespace: string, policy: MemoryPolicy): Promise<MemoryPolicy> {
+    // `stored` is what getMemoryPolicy() reports, not a setting.
+    const { stored: _stored, ...body } = policy;
     return this.request<MemoryPolicy>(
       'PUT',
       `/v1/namespaces/${encodeURIComponent(namespace)}/memory_policy`,
-      policy,
+      body,
     );
   }
 
@@ -4665,8 +5161,21 @@ export class DakeraClient {
     return this.request<BackupSchedule>('POST', '/v1/admin/backups/schedule', request);
   }
 
-  /** POST /admin/backups/restore — restore from backup. */
+  /**
+   * POST /admin/backups/restore — restore from backup. Name the backup
+   * (`backup_id`) or, server v0.12.4+, a `point_in_time` (Unix seconds): the
+   * newest backup completed at or before it that holds the target namespaces
+   * is restored (with `overwrite: true` they are exactly what they were then).
+   */
   async adminRestoreBackup(request: RestoreBackupRequest): Promise<RestoreBackupResponse> {
+    if (request.backup_id === undefined && request.point_in_time === undefined) {
+      throw new ValidationError(
+        'adminRestoreBackup needs backup_id or point_in_time',
+        undefined,
+        undefined,
+        ErrorCode.INVALID_REQUEST,
+      );
+    }
     return this.request<RestoreBackupResponse>('POST', '/v1/admin/backups/restore', request);
   }
 
@@ -4736,7 +5245,12 @@ export class DakeraClient {
     return this.request<TtlStatsResponse>('GET', '/v1/admin/ttl/stats');
   }
 
-  /** POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a namespace. */
+  /**
+   * POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a
+   * namespace. Server v0.12.4+: a sweep of all namespaces lists each one that
+   * failed in `failed` with `success: false`; a failed listing or named sweep
+   * is an error.
+   */
   async adminTtlCleanup(namespace?: string): Promise<TtlCleanupResponse> {
     const body = namespace !== undefined ? { namespace } : {};
     return this.request<TtlCleanupResponse>('POST', '/v1/admin/ttl/cleanup', body);
@@ -4747,7 +5261,10 @@ export class DakeraClient {
     return this.request<RouteResponse>('POST', '/v1/route', request);
   }
 
-  /** GET /v1/import/{job_id}/status — check import job progress. */
+  /**
+   * GET /v1/import/{job_id}/status — check import job progress (`running`,
+   * `done` or `failed`).
+   */
   async importJobStatus(jobId: string): Promise<ImportJobStatus> {
     return this.request<ImportJobStatus>(
       'GET',

@@ -243,8 +243,11 @@ const V0123_ROUTES = [
   'POST /v1/memory/deduplicated/{id}/restore',
 ];
 
+/** Routes server v0.12.4 adds that this SDK calls (`crates/api/src/lib.rs`). */
+const V0124_ROUTES = ['POST /v1/memory/forget/detect'];
+
 const known = new Set(
-  [...V012_ROUTES, ...V0122_ROUTES, ...V0123_ROUTES].map((r) => {
+  [...V012_ROUTES, ...V0122_ROUTES, ...V0123_ROUTES, ...V0124_ROUTES].map((r) => {
     const [method, path] = r.split(' ');
     return `${method} ${path.replace(/\{[^}]*\}/g, '{}')}`;
   })
@@ -273,7 +276,7 @@ function sdkCalls(): Array<{ method: string; path: string }> {
   return out;
 }
 
-describe('SDK endpoints exist in the v0.12.0 / v0.12.2 / v0.12.3 router', () => {
+describe('SDK endpoints exist in the v0.12.0 / v0.12.2 / v0.12.3 / v0.12.4 router', () => {
   const calls = sdkCalls();
 
   it('finds the SDK request calls', () => {
